@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Claw Use</string>
+    <string name="accessibility_description">Claw Use Android — exposes device capabilities via HTTP API for AI agent control. Reads UI tree, performs gestures, and monitors notifications.</string>
+    <string name="notification_channel_name">Bridge Service</string>
+    <string name="notification_channel_desc">Keeps the HTTP bridge running in the background</string>
+</resources>
