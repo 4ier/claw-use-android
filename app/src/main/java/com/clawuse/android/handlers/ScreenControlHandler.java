@@ -136,6 +136,11 @@ public class ScreenControlHandler implements RouteHandler {
      * The pattern grid is centered horizontally and typically occupies the middle
      * portion of the lock screen.
      */
+    /**
+     * EXPERIMENTAL — pattern unlock via gesture dispatch.
+     * NOT YET VERIFIED on any device. PIN unlock is the proven reliable path.
+     * Kept for future development; do not use in production auto-unlock.
+     */
     private void unlockWithPattern(AccessibilityBridge b, String pattern, int screenW, int screenH) throws Exception {
         unlockWithPattern(b, pattern, screenW, screenH, -1, -1, -1);
     }

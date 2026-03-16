@@ -295,7 +295,9 @@ public class BridgeService extends Service {
             if ((pin == null || pin.isEmpty()) && (pattern == null || pattern.isEmpty())) return false;
 
             // Proxy unlock request to a11y server
-            HttpURLConnection conn = (HttpURLConnection)
+            HttpURLConnection conn = null;
+            try {
+                conn = (HttpURLConnection)
                     new URL("http://127.0.0.1:" + A11Y_PORT + "/a11y/screen/unlock").openConnection();
             conn.setConnectTimeout(2000);
             conn.setReadTimeout(10000); // unlock takes time
@@ -319,7 +321,6 @@ public class BridgeService extends Service {
             os.close();
 
             int code = conn.getResponseCode();
-            conn.disconnect();
 
             // Wait for unlock to take effect
             Thread.sleep(1000);
@@ -327,6 +328,9 @@ public class BridgeService extends Service {
             // Re-check
             locked = km != null && km.isKeyguardLocked();
             return !locked;
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
         } catch (Exception e) {
             Log.e(TAG, "Auto-unlock failed", e);
             return false;
