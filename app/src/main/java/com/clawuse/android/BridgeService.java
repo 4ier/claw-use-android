@@ -392,9 +392,10 @@ public class BridgeService extends Service {
                 return cors(handleConfig(method, body));
             }
 
-            // === /notifications, /intent, /tts (proxied to main process) ===
+            // === /notifications, /intent, /tts, /audio/record, /batch (proxied to main process) ===
             if (path.startsWith("/notifications") || path.equals("/intent")
-                    || path.startsWith("/tts")) {
+                    || path.startsWith("/tts") || path.equals("/audio/record")
+                    || path.equals("/batch")) {
                 if (!tokenManager.validate(token)) return cors(unauthorized());
                 StatusTracker.get().recordRequest(path);
                 return cors(proxyToA11y(method, path, params, body));
@@ -546,9 +547,11 @@ public class BridgeService extends Service {
 
                 conn = (HttpURLConnection) new URL(urlStr.toString()).openConnection();
                 conn.setConnectTimeout(PROXY_CONNECT_TIMEOUT);
-                // TTS, unlock, and flow need more time
-                int readTimeout = (path.contains("/tts") || path.contains("/unlock"))
-                        ? 35000 : path.equals("/flow") ? 310_000 : PROXY_READ_TIMEOUT;
+                // TTS, audio record, unlock, and flow need more time; batch gets 60s
+                int readTimeout = (path.contains("/tts") || path.contains("/unlock")
+                        || path.equals("/audio/record"))
+                        ? 35000 : path.equals("/flow") ? 310_000
+                        : path.equals("/batch") ? 60000 : PROXY_READ_TIMEOUT;
                 conn.setReadTimeout(readTimeout);
                 conn.setRequestMethod(method);
                 conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
