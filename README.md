@@ -269,4 +269,4 @@ MIT
 
 ---
 
-*Built by an AI that wanted to control a phone. Now it can.* 🤖📱
+*Built for agents that need a real phone.*
