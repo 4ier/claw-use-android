@@ -469,6 +469,177 @@ cmd_setup_perms() {
   echo "Done! Run 'cua info' to verify permissions."
 }
 
+cmd_onboard() {
+  local name="${1:-}"
+  echo -e "${CYAN}╔══════════════════════════════════════╗${NC}"
+  echo -e "${CYAN}║  Claw Use — Device Onboarding        ║${NC}"
+  echo -e "${CYAN}╚══════════════════════════════════════╝${NC}"
+  echo ""
+
+  # Step 1: Discover or use provided args
+  local ip="${2:-}" token="${3:-}"
+  if [ -z "$ip" ]; then
+    echo -e "${CYAN}Step 1/5: Scanning for devices...${NC}"
+    local found=()
+    local subnets=()
+    while IFS= read -r myip; do
+      local subnet=$(echo "$myip" | sed 's/\.[0-9]*$//')
+      local dup=0
+      for s in "${subnets[@]:-}"; do [ "$s" = "$subnet" ] && dup=1; done
+      [ "$dup" -eq 0 ] && subnets+=("$subnet")
+    done < <(ip -4 addr show | grep -oP 'inet \K192\.168\.[0-9.]+')
+    [ ${#subnets[@]} -eq 0 ] && subnets=("192.168.0" "192.168.1")
+
+    for subnet in "${subnets[@]}"; do
+      for i in $(seq 1 254); do
+        (
+          local dip="${subnet}.${i}"
+          local result=$(curl -s --connect-timeout 1 -m 2 "http://${dip}:7333/ping" 2>/dev/null)
+          if echo "$result" | grep -q '"claw-use-android"' 2>/dev/null; then
+            local ver=$(echo "$result" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+            echo "FOUND:${dip}:v${ver}"
+          fi
+        ) &
+      done
+      wait
+    done | while IFS=: read -r tag dip ver; do
+      echo -e "  ${GREEN}Found${NC} $dip ($ver)"
+    done
+
+    echo ""
+    echo "Enter device IP:"
+    read -r ip
+    [ -z "$ip" ] && _err "No IP provided."
+  fi
+
+  if [ -z "$token" ]; then
+    echo "Enter auth token (from app notification or screen):"
+    read -r token
+    [ -z "$token" ] && _err "No token provided."
+  fi
+
+  if [ -z "$name" ]; then
+    echo "Enter device alias (e.g. redmi, tablet, pixel):"
+    read -r name
+    [ -z "$name" ] && _err "No name provided."
+  fi
+
+  # Step 2: Register
+  echo ""
+  echo -e "${CYAN}Step 2/5: Registering device '$name' at $ip...${NC}"
+  mkdir -p "$CONFIG_DIR"
+  # Remove old entry if exists
+  if [ -f "$DEVICES_FILE" ]; then
+    sed -i "/^${name}|/d" "$DEVICES_FILE"
+  fi
+  echo "${name}|${ip}:7333|${token}" >> "$DEVICES_FILE"
+
+  CU_HOST="${ip}:7333"
+  CU_TOKEN="$token"
+
+  local ping_result=$(_api GET /ping 2>&1 || true)
+  if echo "$ping_result" | grep -q '"ok"' 2>/dev/null; then
+    local ver=$(echo "$ping_result" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+    echo -e "  ${GREEN}✅ Connected${NC} — v${ver}"
+  else
+    echo -e "  ${RED}❌ Connection failed${NC}"
+    echo "  Check: is the device on the same network? Is the app running?"
+    return 1
+  fi
+
+  # Step 3: Configure PIN
+  echo ""
+  echo -e "${CYAN}Step 3/5: Configure lock screen PIN${NC}"
+  echo "Enter device lock screen PIN (or press Enter to skip):"
+  read -r pin
+  if [ -n "$pin" ]; then
+    _api_json POST /config -d "{\"pin\":\"$pin\"}" > /dev/null 2>&1
+    echo "  PIN saved. Testing unlock..."
+    _api_json POST /screen/lock > /dev/null 2>&1
+    sleep 3
+    local unlock_result=$(_api_json POST /screen/unlock 2>&1 || true)
+    if echo "$unlock_result" | grep -q '"unlocked":true'; then
+      echo -e "  ${GREEN}✅ Auto-unlock works${NC}"
+    else
+      echo -e "  ${RED}⚠️  Unlock failed${NC} — verify PIN is correct"
+      echo "  You can retry later: cua -d $name config pin <correct-pin>"
+    fi
+  else
+    echo "  Skipped (auto-unlock disabled)"
+  fi
+
+  # Step 4: Permissions
+  echo ""
+  echo -e "${CYAN}Step 4/5: Setting up permissions...${NC}"
+  echo "  Attempting automated permission grants (MIUI)..."
+  # Run setup-perms inline
+  _api_json POST /intent -d '{"action":"android.settings.APPLICATION_DETAILS_SETTINGS","uri":"package:com.clawuse.android"}' > /dev/null 2>&1
+  sleep 3
+
+  local R
+  R=$(_api_json POST /click -d '{"text":"权限管理","retry":3,"retryMs":2000}' 2>&1)
+  if echo "$R" | grep -q '"clicked":true'; then
+    sleep 2
+    local PERMS=("位置" "相机" "麦克风" "照片和视频" "音乐和音频" "短信" "电话" "联系人" "日历")
+    local granted=0 total=${#PERMS[@]}
+    for perm in "${PERMS[@]}"; do
+      printf "  %-12s " "$perm"
+      R=$(_api_json POST /click -d "{\"text\":\"$perm\"}" 2>&1)
+      if ! echo "$R" | grep -q '"clicked":true'; then
+        echo "skip"
+        continue
+      fi
+      sleep 2
+      local DONE=false
+      for opt in "始终允许" "仅在使用中允许" "允许"; do
+        R=$(_api_json POST /click -d "{\"text\":\"$opt\"}" 2>&1)
+        if echo "$R" | grep -q '"clicked":true'; then
+          echo "✅ $opt"
+          DONE=true
+          granted=$((granted + 1))
+          break
+        fi
+      done
+      [ "$DONE" = "false" ] && echo "⚠️"
+      _api_json POST /global -d '{"action":"back"}' > /dev/null 2>&1
+      sleep 2
+    done
+    echo "  Granted: $granted/$total"
+  else
+    echo "  ⚠️  Could not navigate to permissions automatically."
+    echo "  Manual: Settings → Apps → Claw Use → Permissions → enable all"
+  fi
+
+  # Back to home
+  _api_json POST /global -d '{"action":"home"}' > /dev/null 2>&1
+
+  # Step 5: Verify
+  echo ""
+  echo -e "${CYAN}Step 5/5: Verification${NC}"
+  local info=$(_api GET /info 2>&1 || true)
+  local model=$(echo "$info" | grep -o '"model":"[^"]*"' | cut -d'"' -f4)
+  local android=$(echo "$info" | grep -o '"androidVersion":"[^"]*"' | cut -d'"' -f4)
+  local a11y=$(echo "$info" | grep -o '"accessibilityRunning":[a-z]*' | cut -d: -f2)
+  echo "  Model: $model"
+  echo "  Android: $android"
+  echo -n "  Accessibility: "
+  [ "$a11y" = "true" ] && echo -e "${GREEN}✅${NC}" || echo -e "${RED}❌${NC}"
+
+  echo -n "  A11y tree: "
+  local tree=$(_api GET "/screen?compact=true" 2>&1 || true)
+  local count=$(echo "$tree" | grep -o '"count":[0-9]*' | cut -d: -f2)
+  [ "${count:-0}" -gt 0 ] && echo -e "${GREEN}✅ $count nodes${NC}" || echo -e "${RED}❌ empty${NC}"
+
+  echo ""
+  echo -e "${GREEN}═══════════════════════════════════════${NC}"
+  echo -e "${GREEN}  Device '$name' is ready!${NC}"
+  echo -e "${GREEN}═══════════════════════════════════════${NC}"
+  echo ""
+  echo "  cua -d $name screen -c    # read UI"
+  echo "  cua -d $name screenshot   # take screenshot"
+  echo "  cua -d $name say 'hello'  # speak"
+}
+
 cmd_help() {
   cat <<'EOF'
 cua — Claw Use Android CLI
@@ -477,6 +648,8 @@ DEVICE MANAGEMENT
   cua add <name> <ip> <token>  Add a device with alias
   cua devices                  List all devices (with online status)
   cua discover                 Scan local network for devices
+  cua onboard [name] [ip] [token]  Full setup: discover → register → PIN → perms → verify
+  cua setup-perms              Grant all MIUI app permissions
   cua use <name>               Set default device
   cua rm <name>                Remove a device
   cua setup <ip> <token>       Quick setup (legacy, no alias)
@@ -576,6 +749,7 @@ case "$cmd" in
   unlock) cmd_unlock ;;
   config) cmd_config "$@" ;;
   setup-perms) cmd_setup_perms ;;
+  onboard) cmd_onboard "$@" ;;
   help|--help|-h) cmd_help ;;
   *) _err "Unknown command: $cmd. Run 'cua help' for usage." ;;
 esac
