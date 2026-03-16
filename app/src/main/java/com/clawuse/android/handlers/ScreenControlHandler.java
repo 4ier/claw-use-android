@@ -5,6 +5,7 @@ import android.accessibilityservice.GestureDescription;
 import android.app.KeyguardManager;
 import android.content.Context;
 import android.graphics.Path;
+import android.graphics.Rect;
 import android.os.Build;
 import android.os.PowerManager;
 import android.util.DisplayMetrics;
@@ -14,6 +15,8 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import com.clawuse.android.AccessibilityBridge;
 import com.clawuse.android.ConfigStore;
 import com.clawuse.android.SafeA11y;
+
+import java.util.List;
 
 import org.json.JSONObject;
 
@@ -103,7 +106,10 @@ public class ScreenControlHandler implements RouteHandler {
         // Step 3: Enter credential
         if (!pattern.isEmpty()) {
             // Pattern unlock — draw gesture on 3x3 grid
-            unlockWithPattern(b, pattern, screenW, screenH);
+            int calCenterX = req.optInt("gridCenterX", -1);
+            int calCenterY = req.optInt("gridCenterY", -1);
+            int calGridSize = req.optInt("gridSize", -1);
+            unlockWithPattern(b, pattern, screenW, screenH, calCenterX, calCenterY, calGridSize);
         } else if (!pin.isEmpty()) {
             // PIN/password unlock — tap digits
             unlockWithPin(b, pin);
@@ -131,14 +137,55 @@ public class ScreenControlHandler implements RouteHandler {
      * portion of the lock screen.
      */
     private void unlockWithPattern(AccessibilityBridge b, String pattern, int screenW, int screenH) throws Exception {
-        // Pattern grid is typically centered, ~80% of screen width, in the middle vertical area
-        int gridSize = (int) (screenW * 0.6);
-        int gridLeft = (screenW - gridSize) / 2;
-        int gridTop = (int) (screenH * 0.4);  // pattern grid usually in middle-lower area
-        int cellSize = gridSize / 2;  // 3 dots → 2 gaps
+        unlockWithPattern(b, pattern, screenW, screenH, -1, -1, -1);
+    }
 
-        // Map digit 1-9 to grid coordinates
-        // 1=(0,0) 2=(1,0) 3=(2,0) 4=(0,1) 5=(1,1) 6=(2,1) 7=(0,2) 8=(1,2) 9=(2,2)
+    /**
+     * Draw pattern on 3x3 grid. Pattern is a string of digits 1-9 like "256398".
+     * Grid layout:
+     *   1  2  3
+     *   4  5  6
+     *   7  8  9
+     *
+     * Optional calibration params: gridCenterX, gridCenterY, gridSize
+     * If all -1, auto-detect based on screen dimensions.
+     */
+    private void unlockWithPattern(AccessibilityBridge b, String pattern, int screenW, int screenH,
+                                    int calCenterX, int calCenterY, int calGridSize) throws Exception {
+        int gridLeft, gridTop, gridSize;
+
+        if (calGridSize > 0 && calCenterX > 0 && calCenterY > 0) {
+            // Manual calibration
+            gridSize = calGridSize;
+            gridLeft = calCenterX - gridSize / 2;
+            gridTop = calCenterY - gridSize / 2;
+            android.util.Log.i("ClawUse", "Pattern: using manual calibration");
+        } else {
+            // Try to find LockPatternView from all windows (including lock screen)
+            Rect patternBounds = findPatternViewBounds(b);
+            if (patternBounds != null) {
+                gridLeft = patternBounds.left;
+                gridTop = patternBounds.top;
+                gridSize = Math.min(patternBounds.width(), patternBounds.height());
+                android.util.Log.i("ClawUse", "Pattern: found LockPatternView bounds=" + patternBounds);
+            } else {
+                // Fallback: estimate grid position
+                gridSize = (int) (screenW * 0.55);
+                gridLeft = (screenW - gridSize) / 2;
+                int gridCenterY = (int) (screenH * 0.55);
+                gridTop = gridCenterY - gridSize / 2;
+                android.util.Log.i("ClawUse", "Pattern: using estimated position (no view found)");
+            }
+        }
+
+        int cellSize = gridSize / 2;  // 3 dots → 2 gaps
+        // Dots are at center of each cell, so offset by cellSize/2... no, dots ARE at grid intersections
+        // Actually: 3 dots evenly placed means spacing = gridSize/2, first dot at gridLeft, last at gridLeft+gridSize
+
+        android.util.Log.i("ClawUse", "Pattern grid: left=" + gridLeft + " top=" + gridTop
+                + " size=" + gridSize + " cellSize=" + cellSize);
+
+        // Map digit 1-9 to grid coordinates (dot centers)
         int[][] dotXY = new int[10][2];
         for (int d = 1; d <= 9; d++) {
             int col = (d - 1) % 3;
@@ -147,7 +194,17 @@ public class ScreenControlHandler implements RouteHandler {
             dotXY[d][1] = gridTop + row * cellSize;
         }
 
-        // Build path through pattern dots
+        // Log path
+        StringBuilder sb = new StringBuilder("Pattern path: ");
+        for (char c : pattern.toCharArray()) {
+            int digit = c - '0';
+            if (digit >= 1 && digit <= 9) {
+                sb.append(digit).append("=(").append(dotXY[digit][0]).append(",").append(dotXY[digit][1]).append(") ");
+            }
+        }
+        android.util.Log.i("ClawUse", sb.toString());
+
+        // Build path
         Path path = new Path();
         boolean first = true;
         for (char c : pattern.toCharArray()) {
@@ -161,13 +218,93 @@ public class ScreenControlHandler implements RouteHandler {
             }
         }
 
-        // Dispatch as a single continuous gesture
+        // Dispatch gesture with callback to verify execution
         GestureDescription.Builder builder = new GestureDescription.Builder();
-        long duration = pattern.length() * 80L; // ~80ms per segment
-        builder.addStroke(new GestureDescription.StrokeDescription(path, 0, Math.max(duration, 300)));
-        b.dispatchGesture(builder.build(), null, null);
+        long duration = Math.max(pattern.length() * 150L, 600);
+        builder.addStroke(new GestureDescription.StrokeDescription(path, 0, duration));
 
-        Thread.sleep(1000);
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        final boolean[] success = {false};
+        b.dispatchGesture(builder.build(), new AccessibilityService.GestureResultCallback() {
+            @Override
+            public void onCompleted(GestureDescription gestureDescription) {
+                android.util.Log.i("ClawUse", "Pattern gesture COMPLETED");
+                success[0] = true;
+                latch.countDown();
+            }
+            @Override
+            public void onCancelled(GestureDescription gestureDescription) {
+                android.util.Log.w("ClawUse", "Pattern gesture CANCELLED");
+                latch.countDown();
+            }
+        }, null);
+
+        latch.await(5, java.util.concurrent.TimeUnit.SECONDS);
+        android.util.Log.i("ClawUse", "Pattern gesture result: " + (success[0] ? "completed" : "failed/cancelled"));
+        Thread.sleep(1500);
+    }
+
+    /**
+     * Search all windows for a LockPatternView or similar pattern input view.
+     * Returns the bounds of the pattern view, or null if not found.
+     */
+    private Rect findPatternViewBounds(AccessibilityBridge b) {
+        List<AccessibilityNodeInfo> roots = b.getAllWindowRoots();
+        try {
+            for (AccessibilityNodeInfo root : roots) {
+                Rect found = findPatternViewInTree(root);
+                if (found != null) return found;
+            }
+        } finally {
+            for (AccessibilityNodeInfo root : roots) {
+                try { root.recycle(); } catch (Exception ignored) {}
+            }
+        }
+        return null;
+    }
+
+    private Rect findPatternViewInTree(AccessibilityNodeInfo node) {
+        if (node == null) return null;
+
+        String cls = node.getClassName() != null ? node.getClassName().toString() : "";
+
+        // Log all nodes in lock screen for debugging
+        Rect bounds = new Rect();
+        node.getBoundsInScreen(bounds);
+        android.util.Log.d("ClawUse", "Lock tree: class=" + cls + " bounds=" + bounds
+                + " desc=" + node.getContentDescription());
+
+        // Look for pattern views by class name
+        if (cls.contains("LockPatternView") || cls.contains("PatternView")
+                || cls.contains("lockpattern") || cls.contains("patternview")) {
+            node.getBoundsInScreen(bounds);
+            if (bounds.width() > 100 && bounds.height() > 100) {
+                return bounds;
+            }
+        }
+
+        // Also look for large square-ish views that could be the pattern area
+        // (MIUI might use custom class names)
+        if (bounds.width() > 200 && bounds.height() > 200
+                && Math.abs(bounds.width() - bounds.height()) < bounds.width() * 0.3) {
+            // Candidate: large roughly-square view
+            CharSequence desc = node.getContentDescription();
+            if (desc != null && (desc.toString().contains("图案") || desc.toString().contains("pattern")
+                    || desc.toString().contains("Pattern"))) {
+                return bounds;
+            }
+        }
+
+        // Recurse into children
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                Rect found = findPatternViewInTree(child);
+                child.recycle();
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private void unlockWithPin(AccessibilityBridge b, String pin) throws Exception {

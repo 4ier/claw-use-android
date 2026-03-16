@@ -164,7 +164,29 @@ public class ScreenHandler implements RouteHandler {
         String result = SafeA11y.run(() -> {
             AccessibilityNodeInfo root = b.getRootNode();
             if (root == null) {
-                return "{\"error\":\"no active window\",\"nodes\":[]}";
+                // Fallback: try getAllWindowRoots() for lock screen etc.
+                java.util.List<AccessibilityNodeInfo> allRoots = b.getAllWindowRoots();
+                if (allRoots.isEmpty()) {
+                    return "{\"error\":\"no active window\",\"nodes\":[]}";
+                }
+                try {
+                    JSONObject json = new JSONObject();
+                    json.put("package", "");
+                    json.put("timestamp", System.currentTimeMillis());
+                    json.put("source", "allWindows");
+                    JSONArray nodes = new JSONArray();
+                    AtomicBoolean cancelled = new AtomicBoolean(false);
+                    for (AccessibilityNodeInfo r : allRoots) {
+                        traverseNode(r, nodes, 0, compact, cancelled);
+                    }
+                    json.put("nodes", nodes);
+                    json.put("count", nodes.length());
+                    return json.toString();
+                } finally {
+                    for (AccessibilityNodeInfo r : allRoots) {
+                        try { r.recycle(); } catch (Exception ignored) {}
+                    }
+                }
             }
 
             try {

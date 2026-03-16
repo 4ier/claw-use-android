@@ -399,8 +399,9 @@ public class BridgeService extends Service {
                 // Auto-unlock before a11y operations (Task 7)
                 KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
                 boolean locked = km != null && km.isKeyguardLocked();
-                if (locked && !path.contains("/screen/unlock") && !path.contains("/screen/state")
-                        && !path.contains("/screen/wake")) {
+                if (locked && !path.contains("/screen/") && !path.contains("/screenshot")
+                        && !path.contains("/swipe") && !path.contains("/tap")
+                        && !path.contains("/global")) {
                     if (configStore.hasUnlockCredential()) {
                         boolean unlocked = ensureUnlocked();
                         if (!unlocked) {
@@ -428,7 +429,7 @@ public class BridgeService extends Service {
             try {
                 JSONObject j = StatusTracker.get().toJson();
                 j.put("status", StatusTracker.get().isA11yAlive() ? "ok" : "degraded");
-                j.put("version", "1.5.0");
+                j.put("version", "1.6.2");
 
                 // Device info
                 JSONObject device = new JSONObject();

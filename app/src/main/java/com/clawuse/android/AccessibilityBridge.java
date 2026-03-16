@@ -8,6 +8,9 @@ import android.os.Build;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Core AccessibilityService that provides UI tree reading, gesture dispatch,
@@ -60,6 +63,27 @@ public class AccessibilityBridge extends AccessibilityService {
     /** Get the root node of the currently active window. Caller must recycle. */
     public AccessibilityNodeInfo getRootNode() {
         return getRootInActiveWindow();
+    }
+
+    /**
+     * Get root nodes from ALL windows (including lock screen).
+     * Use when getRootNode() returns null (e.g. on lock screen).
+     * Caller must recycle all returned nodes.
+     */
+    public List<AccessibilityNodeInfo> getAllWindowRoots() {
+        List<AccessibilityNodeInfo> roots = new ArrayList<>();
+        try {
+            List<AccessibilityWindowInfo> windows = getWindows();
+            for (AccessibilityWindowInfo w : windows) {
+                AccessibilityNodeInfo root = w.getRoot();
+                if (root != null) {
+                    roots.add(root);
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "getAllWindowRoots failed: " + e.getMessage());
+        }
+        return roots;
     }
 
     /** Perform a global action (BACK, HOME, RECENTS, etc.) */
