@@ -1,7 +1,6 @@
 package com.clawuse.android.handlers;
 
 import android.content.Context;
-import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.BatteryManager;
 import android.os.Build;
@@ -9,9 +8,6 @@ import android.os.Environment;
 import android.os.StatFs;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
-
-import com.clawuse.android.AccessibilityBridge;
-import com.clawuse.android.NotificationBridge;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -98,11 +94,37 @@ public class InfoHandler implements RouteHandler {
         info.put("storageTotalMB", totalBytes / (1024 * 1024));
         info.put("storageFreeMB", freeBytes / (1024 * 1024));
 
-        // Services
-        info.put("accessibilityRunning", AccessibilityBridge.isRunning());
-        info.put("notificationListenerRunning", NotificationBridge.isRunning());
+        // Services — probe internal a11y server to check status across processes
+        boolean a11yRunning = probeA11yServer();
+        info.put("accessibilityRunning", a11yRunning);
+        info.put("notificationListenerRunning", false); // TODO: cross-process check
 
         return info.toString();
+    }
+
+    /**
+     * Probe the internal a11y server on 127.0.0.1:7334 to check if accessibility is running.
+     * Returns false if the server is unreachable or not responding.
+     */
+    private boolean probeA11yServer() {
+        java.net.HttpURLConnection conn = null;
+        try {
+            conn = (java.net.HttpURLConnection) new java.net.URL("http://127.0.0.1:7334/a11y/ping").openConnection();
+            conn.setConnectTimeout(500);
+            conn.setReadTimeout(500);
+            int code = conn.getResponseCode();
+            if (code == 200) {
+                java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                String line = r.readLine();
+                r.close();
+                return line != null && line.contains("\"a11y\":true");
+            }
+        } catch (Exception e) {
+            // Server not available
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+        return false;
     }
 
     private String handlePermissions() throws Exception {
@@ -120,8 +142,8 @@ public class InfoHandler implements RouteHandler {
 
         JSONObject result = new JSONObject();
         result.put("permissions", permissions);
-        result.put("accessibilityService", AccessibilityBridge.isRunning());
-        result.put("notificationListener", NotificationBridge.isRunning());
+        result.put("accessibilityService", probeA11yServer());
+        result.put("notificationListener", false);
         return result.toString();
     }
 }

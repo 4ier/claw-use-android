@@ -10,6 +10,7 @@ import android.os.Looper;
 import android.view.accessibility.AccessibilityNodeInfo;
 
 import com.clawuse.android.AccessibilityBridge;
+import com.clawuse.android.SafeA11y;
 
 import org.json.JSONObject;
 
@@ -20,31 +21,40 @@ import java.util.concurrent.TimeUnit;
 /**
  * Handles gesture/interaction endpoints:
  * POST /click, /tap, /longpress, /swipe, /type, /scroll
+ *
+ * All accessibility tree operations go through SafeA11y for timeout protection.
  */
 public class GestureHandler implements RouteHandler {
+    private static final int A11Y_TIMEOUT = 3000;
     private final Context context;
+    private final AccessibilityBridge bridge;
 
     public GestureHandler(Context context) {
         this.context = context;
+        this.bridge = (context instanceof AccessibilityBridge) ? (AccessibilityBridge) context : null;
+    }
+
+    private AccessibilityBridge getBridge() {
+        return bridge != null ? bridge : AccessibilityBridge.getInstance();
     }
 
     @Override
     public String handle(String method, String path, Map<String, String> params, String body) throws Exception {
-        AccessibilityBridge bridge = AccessibilityBridge.getInstance();
-        if (bridge == null) {
+        AccessibilityBridge b = getBridge();
+        if (b == null) {
             return "{\"error\":\"accessibility service not running\"}";
         }
 
         JSONObject req = body != null && !body.isEmpty() ? new JSONObject(body) : new JSONObject();
 
         switch (path) {
-            case "/click":   return handleClick(bridge, req);
-            case "/tap":     return handleTap(bridge, req);
-            case "/longpress": return handleLongPress(bridge, req);
-            case "/swipe":   return handleSwipe(bridge, req);
-            case "/type":    return handleType(bridge, req);
-            case "/scroll":  return handleScroll(bridge, req);
-            default:         return "{\"error\":\"unknown gesture endpoint\"}";
+            case "/click":     return handleClick(b, req);
+            case "/tap":       return handleTap(b, req);
+            case "/longpress": return handleLongPress(b, req);
+            case "/swipe":     return handleSwipe(b, req);
+            case "/type":      return handleType(b, req);
+            case "/scroll":    return handleScroll(b, req);
+            default:           return "{\"error\":\"unknown gesture endpoint\"}";
         }
     }
 
@@ -57,14 +67,14 @@ public class GestureHandler implements RouteHandler {
             return "{\"error\":\"provide 'text', 'id', or 'desc'\"}";
         }
 
-        AccessibilityNodeInfo root = bridge.getRootNode();
-        if (root == null) return "{\"error\":\"no active window\"}";
+        AccessibilityNodeInfo root = SafeA11y.getRootSafe(bridge, A11Y_TIMEOUT);
+        if (root == null) return "{\"error\":\"no active window (timed out)\"}";
 
         try {
             AccessibilityNodeInfo target = null;
-            if (!text.isEmpty()) target = bridge.findByText(root, text);
-            if (target == null && !id.isEmpty()) target = bridge.findById(root, id);
-            if (target == null && !desc.isEmpty()) target = bridge.findByDesc(root, desc);
+            if (!text.isEmpty()) target = SafeA11y.findByTextSafe(bridge, root, text, A11Y_TIMEOUT);
+            if (target == null && !id.isEmpty()) target = SafeA11y.findByIdSafe(bridge, root, id, A11Y_TIMEOUT);
+            if (target == null && !desc.isEmpty()) target = SafeA11y.findByDescSafe(bridge, root, desc, A11Y_TIMEOUT);
 
             if (target == null) {
                 return "{\"error\":\"element not found\",\"text\":\"" + escapeJson(text) +
@@ -103,9 +113,9 @@ public class GestureHandler implements RouteHandler {
 
         int x, y;
         if (!text.isEmpty()) {
-            AccessibilityNodeInfo root = bridge.getRootNode();
-            if (root == null) return "{\"error\":\"no active window\"}";
-            AccessibilityNodeInfo target = bridge.findByText(root, text);
+            AccessibilityNodeInfo root = SafeA11y.getRootSafe(bridge, A11Y_TIMEOUT);
+            if (root == null) return "{\"error\":\"no active window (timed out)\"}";
+            AccessibilityNodeInfo target = SafeA11y.findByTextSafe(bridge, root, text, A11Y_TIMEOUT);
             if (target == null) {
                 root.recycle();
                 return "{\"error\":\"element not found\"}";
@@ -156,10 +166,11 @@ public class GestureHandler implements RouteHandler {
                 ClipData clip = ClipData.newPlainText("claw-type", text);
                 clipboard.setPrimaryClip(clip);
 
-                // Find focused editable node and paste
-                AccessibilityNodeInfo root = bridge.getRootNode();
+                // Find focused editable node and paste (with timeout protection)
+                AccessibilityNodeInfo root = SafeA11y.getRootSafe(bridge, A11Y_TIMEOUT);
                 if (root != null) {
-                    AccessibilityNodeInfo focused = findFocusedEditable(root);
+                    AccessibilityNodeInfo focused = SafeA11y.run(
+                            () -> findFocusedEditable(root), A11Y_TIMEOUT);
                     if (focused != null) {
                         focused.performAction(AccessibilityNodeInfo.ACTION_PASTE);
                         success[0] = true;
@@ -173,7 +184,7 @@ public class GestureHandler implements RouteHandler {
             latch.countDown();
         });
 
-        latch.await(3, TimeUnit.SECONDS);
+        latch.await(5, TimeUnit.SECONDS);
         return new JSONObject()
                 .put("typed", success[0]).put("text", text).put("method", "clipboard_paste").toString();
     }
@@ -182,21 +193,21 @@ public class GestureHandler implements RouteHandler {
         String direction = req.optString("direction", "down");
         String targetText = req.optString("text", "");
 
-        AccessibilityNodeInfo root = bridge.getRootNode();
-        if (root == null) return "{\"error\":\"no active window\"}";
+        AccessibilityNodeInfo root = SafeA11y.getRootSafe(bridge, A11Y_TIMEOUT);
+        if (root == null) return "{\"error\":\"no active window (timed out)\"}";
 
         try {
             // Find scrollable container
             AccessibilityNodeInfo scrollable = null;
             if (!targetText.isEmpty()) {
-                scrollable = bridge.findByText(root, targetText);
+                scrollable = SafeA11y.findByTextSafe(bridge, root, targetText, A11Y_TIMEOUT);
                 if (scrollable != null && !scrollable.isScrollable()) {
                     scrollable.recycle();
                     scrollable = null;
                 }
             }
             if (scrollable == null) {
-                scrollable = findFirstScrollable(root);
+                scrollable = SafeA11y.run(() -> findFirstScrollable(root), A11Y_TIMEOUT);
             }
 
             if (scrollable == null) {

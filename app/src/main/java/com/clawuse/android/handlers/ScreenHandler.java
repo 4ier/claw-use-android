@@ -4,56 +4,102 @@ import android.graphics.Rect;
 import android.view.accessibility.AccessibilityNodeInfo;
 
 import com.clawuse.android.AccessibilityBridge;
+import com.clawuse.android.SafeA11y;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Handles /screen and /screenshot endpoints.
- * /screen returns the full UI tree as JSON. ?compact returns only interactive/text elements.
- * /screenshot returns a PNG screenshot (API 30+).
+ *
+ * Tree traversal runs through SafeA11y (single-thread executor with timeout).
+ * If the worker gets stuck on a pathological UI tree, subsequent requests
+ * return a timeout error immediately — the HTTP server stays responsive.
  */
 public class ScreenHandler implements RouteHandler {
+    private static final int DEFAULT_TIMEOUT_MS = 3000;
+    private AccessibilityBridge bridge;
+
+    /** Optional: set bridge instance directly (used in main process). */
+    public void setBridge(AccessibilityBridge bridge) {
+        this.bridge = bridge;
+    }
+
+    private AccessibilityBridge getBridge() {
+        return bridge != null ? bridge : AccessibilityBridge.getInstance();
+    }
 
     @Override
     public String handle(String method, String path, Map<String, String> params, String body) throws Exception {
         if (path.startsWith("/screenshot")) {
             return handleScreenshot();
         }
-        // /screen
         boolean compact = params.containsKey("compact");
-        return getScreenJson(compact);
+        int timeoutMs = DEFAULT_TIMEOUT_MS;
+        if (params.containsKey("timeout")) {
+            try {
+                timeoutMs = Integer.parseInt(params.get("timeout"));
+                if (timeoutMs < 500) timeoutMs = 500;
+                if (timeoutMs > 15000) timeoutMs = 15000;
+            } catch (NumberFormatException ignored) {}
+        }
+        return getScreenJson(compact, timeoutMs);
     }
 
-    private String getScreenJson(boolean compact) throws Exception {
-        AccessibilityBridge bridge = AccessibilityBridge.getInstance();
-        if (bridge == null) {
+    private String getScreenJson(boolean compact, int timeoutMs) throws Exception {
+        AccessibilityBridge b = getBridge();
+        if (b == null) {
             return "{\"error\":\"accessibility service not running\",\"nodes\":[]}";
         }
 
-        AccessibilityNodeInfo root = bridge.getRootNode();
-        if (root == null) {
-            return "{\"error\":\"no active window\",\"nodes\":[]}";
+        // Check if SafeA11y worker is already stuck
+        if (SafeA11y.isWorkerBusy()) {
+            return new JSONObject()
+                    .put("error", "accessibility worker busy (previous request stuck)")
+                    .put("nodes", new JSONArray())
+                    .put("hint", "try again later or navigate away from current app")
+                    .toString();
         }
 
-        try {
-            JSONObject result = new JSONObject();
-            result.put("package", root.getPackageName());
-            result.put("timestamp", System.currentTimeMillis());
-            JSONArray nodes = new JSONArray();
-            traverseNode(root, nodes, 0, compact);
-            result.put("nodes", nodes);
-            result.put("count", nodes.length());
-            return result.toString();
-        } finally {
-            root.recycle();
+        // Run entire tree read through SafeA11y's single-thread executor
+        String result = SafeA11y.run(() -> {
+            AccessibilityNodeInfo root = b.getRootNode();
+            if (root == null) {
+                return "{\"error\":\"no active window\",\"nodes\":[]}";
+            }
+
+            try {
+                JSONObject json = new JSONObject();
+                json.put("package", root.getPackageName());
+                json.put("timestamp", System.currentTimeMillis());
+                JSONArray nodes = new JSONArray();
+                AtomicBoolean cancelled = new AtomicBoolean(false);
+                traverseNode(root, nodes, 0, compact, cancelled);
+                json.put("nodes", nodes);
+                json.put("count", nodes.length());
+                return json.toString();
+            } finally {
+                root.recycle();
+            }
+        }, timeoutMs);
+
+        if (result == null) {
+            return new JSONObject()
+                    .put("error", "screen read timed out")
+                    .put("nodes", new JSONArray())
+                    .put("truncated", true)
+                    .put("timeoutMs", timeoutMs)
+                    .toString();
         }
+
+        return result;
     }
 
-    private void traverseNode(AccessibilityNodeInfo node, JSONArray nodes, int depth, boolean compact) {
-        if (node == null) return;
+    private void traverseNode(AccessibilityNodeInfo node, JSONArray nodes, int depth, boolean compact, AtomicBoolean cancelled) {
+        if (node == null || cancelled.get() || Thread.currentThread().isInterrupted()) return;
         try {
             String text = node.getText() != null ? node.getText().toString() : "";
             String desc = node.getContentDescription() != null ? node.getContentDescription().toString() : "";
@@ -84,9 +130,10 @@ public class ScreenHandler implements RouteHandler {
             }
 
             for (int i = 0; i < node.getChildCount(); i++) {
+                if (cancelled.get() || Thread.currentThread().isInterrupted()) return;
                 AccessibilityNodeInfo child = node.getChild(i);
                 if (child != null) {
-                    traverseNode(child, nodes, depth + 1, compact);
+                    traverseNode(child, nodes, depth + 1, compact, cancelled);
                     child.recycle();
                 }
             }
@@ -96,8 +143,6 @@ public class ScreenHandler implements RouteHandler {
     }
 
     private String handleScreenshot() {
-        // API 30+ takeScreenshot is async — for now return not-yet-implemented
-        // Phase 2 will implement with CountDownLatch + callback
         return "{\"error\":\"screenshot not yet implemented\",\"hint\":\"coming in phase 2\"}";
     }
 }

@@ -46,6 +46,16 @@
     <!-- Vibration -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Package visibility (needed to list/launch all apps on Android 11+) -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!-- Auto-start on boot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Battery optimization exemption (prevent MIUI from killing service) -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <!-- Flashlight -->
     <uses-permission android:name="android.permission.FLASHLIGHT"
         tools:ignore="ProtectedPermissions" />
@@ -54,6 +64,7 @@
         android:label="Claw Use"
         android:icon="@android:drawable/ic_menu_compass"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar"
+        android:usesCleartextTraffic="true"
         android:supportsRtl="true">
 
         <activity
@@ -66,9 +77,10 @@
             </intent-filter>
         </activity>
 
-        <!-- HTTP Bridge Foreground Service -->
+        <!-- HTTP Bridge Foreground Service — runs in separate :http process -->
         <service
             android:name=".BridgeService"
+            android:process=":http"
             android:foregroundServiceType="specialUse"
             android:exported="false">
             <property
@@ -98,6 +110,15 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Boot receiver — auto-start BridgeService -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>

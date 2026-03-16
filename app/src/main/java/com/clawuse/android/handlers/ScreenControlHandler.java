@@ -3,30 +3,35 @@ package com.clawuse.android.handlers;
 import android.accessibilityservice.AccessibilityService;
 import android.app.KeyguardManager;
 import android.content.Context;
-import android.graphics.Rect;
 import android.os.Build;
 import android.os.PowerManager;
-import android.os.SystemClock;
+import android.util.DisplayMetrics;
+import android.view.WindowManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 
 import com.clawuse.android.AccessibilityBridge;
+import com.clawuse.android.SafeA11y;
 
 import org.json.JSONObject;
 
 import java.util.Map;
 
 /**
- * Handles screen lock/unlock/wake/state endpoints:
- * POST /screen/lock     — lock screen
- * POST /screen/unlock   — wake + swipe + enter PIN via UI automation
- * POST /screen/wake     — wake screen without unlocking
- * GET  /screen/state    — current screen/lock state
+ * Handles screen lock/unlock/wake/state endpoints.
+ * All accessibility tree operations go through SafeA11y for timeout protection.
  */
 public class ScreenControlHandler implements RouteHandler {
+    private static final int A11Y_TIMEOUT = 3000;
     private final Context context;
+    private final AccessibilityBridge bridge;
 
     public ScreenControlHandler(Context context) {
         this.context = context;
+        this.bridge = (context instanceof AccessibilityBridge) ? (AccessibilityBridge) context : null;
+    }
+
+    private AccessibilityBridge getBridge() {
+        return bridge != null ? bridge : AccessibilityBridge.getInstance();
     }
 
     @Override
@@ -41,11 +46,11 @@ public class ScreenControlHandler implements RouteHandler {
     }
 
     private String handleLock() throws Exception {
-        AccessibilityBridge bridge = AccessibilityBridge.getInstance();
-        if (bridge == null) return "{\"error\":\"accessibility service not running\"}";
+        AccessibilityBridge b = getBridge();
+        if (b == null) return "{\"error\":\"accessibility service not running\"}";
 
         if (Build.VERSION.SDK_INT >= 28) {
-            boolean locked = bridge.doGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN);
+            boolean locked = b.doGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN);
             return new JSONObject().put("locked", locked).toString();
         } else {
             return "{\"error\":\"lock requires API 28+\"}";
@@ -53,57 +58,64 @@ public class ScreenControlHandler implements RouteHandler {
     }
 
     private String handleUnlock(String body) throws Exception {
-        AccessibilityBridge bridge = AccessibilityBridge.getInstance();
-        if (bridge == null) return "{\"error\":\"accessibility service not running\"}";
+        AccessibilityBridge b = getBridge();
+        if (b == null) return "{\"error\":\"accessibility service not running\"}";
 
         JSONObject req = body != null && !body.isEmpty() ? new JSONObject(body) : new JSONObject();
         String pin = req.optString("pin", "");
+
+        // Get screen dimensions for accurate swipe coordinates
+        int screenW = 1080, screenH = 2400; // safe defaults
+        try {
+            WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+            if (wm != null) {
+                DisplayMetrics dm = new DisplayMetrics();
+                wm.getDefaultDisplay().getMetrics(dm);
+                screenW = dm.widthPixels;
+                screenH = dm.heightPixels;
+            }
+        } catch (Exception ignored) {}
+        int centerX = screenW / 2;
 
         // Step 1: Wake screen
         wakeScreen();
         Thread.sleep(500);
 
-        // Step 2: Swipe up to dismiss lock screen
-        // Standard Android: swipe from bottom center to top center
-        bridge.swipe(540, 1800, 540, 600, 300);
+        // Step 2: Swipe up to dismiss lock screen (from 75% height to 25% height)
+        b.swipe(centerX, screenH * 3 / 4, centerX, screenH / 4, 300);
         Thread.sleep(800);
 
         // Step 3: Enter PIN if provided
         if (!pin.isEmpty()) {
-            AccessibilityNodeInfo root = bridge.getRootNode();
+            AccessibilityNodeInfo root = SafeA11y.getRootSafe(b, A11Y_TIMEOUT);
             if (root == null) {
-                return new JSONObject().put("unlocked", false).put("error", "no window after swipe").toString();
+                return new JSONObject().put("unlocked", false).put("error", "no window after swipe (timed out)").toString();
             }
 
             try {
-                // Enter each digit by finding and clicking the PIN pad buttons
                 for (char digit : pin.toCharArray()) {
                     String digitStr = String.valueOf(digit);
-                    AccessibilityNodeInfo digitBtn = bridge.findByText(root, digitStr);
+                    AccessibilityNodeInfo digitBtn = SafeA11y.findByTextSafe(b, root, digitStr, A11Y_TIMEOUT);
                     if (digitBtn != null) {
-                        bridge.clickNode(digitBtn);
+                        b.clickNode(digitBtn);
                         digitBtn.recycle();
                         Thread.sleep(100);
                     }
-                    // Refresh root for next digit (PIN pad may re-render)
                     root.recycle();
-                    root = bridge.getRootNode();
+                    root = SafeA11y.getRootSafe(b, A11Y_TIMEOUT);
                     if (root == null) break;
                 }
 
-                // Try to click Enter/OK/confirm button
                 if (root != null) {
                     Thread.sleep(300);
                     root.recycle();
-                    root = bridge.getRootNode();
+                    root = SafeA11y.getRootSafe(b, A11Y_TIMEOUT);
                     if (root != null) {
-                        // Look for enter/confirm button
-                        AccessibilityNodeInfo enter = bridge.findByDesc(root, "Enter");
-                        if (enter == null) enter = bridge.findByText(root, "OK");
-                        if (enter == null) enter = bridge.findByDesc(root, "확인"); // Korean
-                        if (enter == null) enter = bridge.findByDesc(root, "确认"); // Chinese
+                        AccessibilityNodeInfo enter = SafeA11y.findByDescSafe(b, root, "Enter", A11Y_TIMEOUT);
+                        if (enter == null) enter = SafeA11y.findByTextSafe(b, root, "OK", A11Y_TIMEOUT);
+                        if (enter == null) enter = SafeA11y.findByDescSafe(b, root, "确认", A11Y_TIMEOUT);
                         if (enter != null) {
-                            bridge.clickNode(enter);
+                            b.clickNode(enter);
                             enter.recycle();
                         }
                     }
@@ -115,7 +127,6 @@ public class ScreenControlHandler implements RouteHandler {
             Thread.sleep(500);
         }
 
-        // Check final state
         KeyguardManager km = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
         boolean isLocked = km != null && km.isKeyguardLocked();
 

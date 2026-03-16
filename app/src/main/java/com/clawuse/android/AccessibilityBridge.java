@@ -16,6 +16,7 @@ import android.view.accessibility.AccessibilityNodeInfo;
 public class AccessibilityBridge extends AccessibilityService {
     private static final String TAG = "ClawA11y";
     private static volatile AccessibilityBridge instance;
+    private A11yInternalServer internalServer;
 
     public static AccessibilityBridge getInstance() {
         return instance;
@@ -30,6 +31,10 @@ public class AccessibilityBridge extends AccessibilityService {
         super.onServiceConnected();
         instance = this;
         Log.i(TAG, "AccessibilityBridge connected");
+
+        // Start internal a11y server for cross-process communication
+        internalServer = new A11yInternalServer(this);
+        internalServer.startServer();
     }
 
     @Override
@@ -45,6 +50,7 @@ public class AccessibilityBridge extends AccessibilityService {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        if (internalServer != null) internalServer.stopServer();
         instance = null;
         Log.i(TAG, "AccessibilityBridge destroyed");
     }

@@ -6,7 +6,6 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
-import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
@@ -14,23 +13,36 @@ import android.util.Log;
 import com.clawuse.android.auth.TokenManager;
 import com.clawuse.android.handlers.*;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.URL;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import java.io.InputStream;
+
 import fi.iki.elonen.NanoHTTPD;
 
 /**
- * Foreground service hosting the NanoHTTPD HTTP server on port 7333.
- * Routes requests to handler classes. Requires X-Bridge-Token for auth.
+ * External HTTP server on 0.0.0.0:7333, running in the :http process.
+ *
+ * Non-a11y endpoints are handled locally (ping, info, launch, screen/state, screen/wake).
+ * A11y-dependent endpoints are proxied to the internal server on 127.0.0.1:7334
+ * with strict timeouts. If the main process hangs, this process stays responsive.
  */
 public class BridgeService extends Service {
     private static final String TAG = "ClawBridge";
     private static final int PORT = 7333;
+    private static final int A11Y_PORT = 7334;
+    private static final int PROXY_CONNECT_TIMEOUT = 1000;
+    private static final int PROXY_READ_TIMEOUT = 5000;
     private static final String CHANNEL_ID = "claw_bridge_channel";
     private static final int NOTIFICATION_ID = 7333;
 
@@ -38,15 +50,9 @@ public class BridgeService extends Service {
     private TokenManager tokenManager;
     private static volatile BridgeService instance;
 
-    // Handlers
-    private ScreenHandler screenHandler;
-    private GestureHandler gestureHandler;
-    private GlobalHandler globalHandler;
-    private ScreenControlHandler screenControlHandler;
+    // Local handlers (no a11y dependency)
     private InfoHandler infoHandler;
-    private StubHandler cameraStub, audioStub, locationStub, sensorStub;
-    private StubHandler notificationStub, clipboardStub, appStub, phoneStub;
-    private StubHandler contactStub, fileStub, deviceStub;
+    private LaunchHandler launchHandler;
 
     public static BridgeService getInstance() {
         return instance;
@@ -57,7 +63,8 @@ public class BridgeService extends Service {
         super.onCreate();
         instance = this;
         tokenManager = new TokenManager(this);
-        initHandlers();
+        infoHandler = new InfoHandler(this);
+        launchHandler = new LaunchHandler(this);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
         startServer();
@@ -77,9 +84,7 @@ public class BridgeService extends Service {
     public void onDestroy() {
         super.onDestroy();
         instance = null;
-        if (server != null) {
-            server.stop();
-        }
+        if (server != null) server.stop();
         Log.i(TAG, "BridgeService destroyed");
     }
 
@@ -88,39 +93,14 @@ public class BridgeService extends Service {
     }
 
     public String getServerUrl() {
-        String ip = getWifiIpAddress();
-        return "http://" + ip + ":" + PORT;
-    }
-
-    // ── Server ──────────────────────────────────────────────────
-
-    private void initHandlers() {
-        screenHandler = new ScreenHandler();
-        gestureHandler = new GestureHandler(this);
-        globalHandler = new GlobalHandler();
-        screenControlHandler = new ScreenControlHandler(this);
-        infoHandler = new InfoHandler(this);
-
-        // Phase 2 stubs
-        cameraStub = new StubHandler("camera");
-        audioStub = new StubHandler("audio");
-        locationStub = new StubHandler("location");
-        sensorStub = new StubHandler("sensors");
-        notificationStub = new StubHandler("notifications");
-        clipboardStub = new StubHandler("clipboard");
-        appStub = new StubHandler("apps");
-        phoneStub = new StubHandler("phone/sms");
-        contactStub = new StubHandler("contacts/calendar");
-        fileStub = new StubHandler("files");
-        deviceStub = new StubHandler("device");
+        return "http://" + getWifiIpAddress() + ":" + PORT;
     }
 
     private void startServer() {
         try {
             server = new BridgeHttpServer(PORT);
-            server.start();
+            server.start(5000, false);
             Log.i(TAG, "HTTP server started on port " + PORT);
-            // Update notification with URL
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm != null) nm.notify(NOTIFICATION_ID, buildNotification());
         } catch (IOException e) {
@@ -128,7 +108,7 @@ public class BridgeService extends Service {
         }
     }
 
-    // ── HTTP Server (NanoHTTPD) ─────────────────────────────────
+    // ── HTTP Server ─────────────────────────────────────────────
 
     private class BridgeHttpServer extends NanoHTTPD {
         BridgeHttpServer(int port) {
@@ -141,101 +121,165 @@ public class BridgeService extends Service {
             String method = session.getMethod().name();
             Map<String, String> params = session.getParms();
 
-            // Read body for POST
+            // Read body for POST — use raw InputStream for correct UTF-8 handling
+            // (NanoHTTPD's parseBody() uses ISO-8859-1 which corrupts CJK text)
             String body = "";
-            if (method.equals("POST")) {
-                try {
-                    Map<String, String> bodyMap = new HashMap<>();
-                    session.parseBody(bodyMap);
-                    body = bodyMap.getOrDefault("postData", "");
-                } catch (Exception e) {
-                    body = "";
-                }
+            if ("POST".equals(method)) {
+                body = readBodyUtf8(session);
             }
 
             // CORS preflight
-            if (method.equals("OPTIONS")) {
-                return newCorsResponse(newFixedLengthResponse(Response.Status.OK, "text/plain", ""));
+            if ("OPTIONS".equals(method)) {
+                return cors(newFixedLengthResponse(Response.Status.OK, "text/plain", ""));
             }
 
-            // /ping is unauthenticated
-            if (path.equals("/ping")) {
-                try {
-                    String json = infoHandler.handle(method, path, params, body);
-                    return newCorsResponse(newFixedLengthResponse(Response.Status.OK, "application/json", json));
-                } catch (Exception e) {
-                    return errorResponse(500, e.getMessage());
-                }
+            // === LOCAL ENDPOINTS (no a11y dependency) ===
+
+            if ("/ping".equals(path)) {
+                return handleLocal(infoHandler, method, path, params, body);
+            }
+            if ("/info".equals(path) || "/permissions".equals(path)) {
+                String token = session.getHeaders().get("x-bridge-token");
+                if (!tokenManager.validate(token))
+                    return cors(unauthorized());
+                return handleLocal(infoHandler, method, path, params, body);
+            }
+            if ("/launch".equals(path)) {
+                String token = session.getHeaders().get("x-bridge-token");
+                if (!tokenManager.validate(token))
+                    return cors(unauthorized());
+                return handleLocal(launchHandler, method, path, params, body);
             }
 
-            // Auth check for all other endpoints
+            // === A11Y ENDPOINTS (proxied to main process :7334) ===
+
             String token = session.getHeaders().get("x-bridge-token");
-            if (!tokenManager.validate(token)) {
-                return newCorsResponse(newFixedLengthResponse(
-                        Response.Status.UNAUTHORIZED,
-                        "application/json",
-                        "{\"error\":\"unauthorized\",\"hint\":\"include X-Bridge-Token header\"}"));
+            if (!tokenManager.validate(token))
+                return cors(unauthorized());
+
+            if (isA11yEndpoint(path)) {
+                return cors(proxyToA11y(method, path, params, body));
             }
 
-            // Route to handler
+            return cors(newFixedLengthResponse(Response.Status.NOT_FOUND, "application/json",
+                    "{\"error\":\"not found\",\"path\":\"" + escapeJson(path) + "\"}"));
+        }
+
+        private boolean isA11yEndpoint(String path) {
+            return path.startsWith("/screen") || path.equals("/click") || path.equals("/tap")
+                    || path.equals("/longpress") || path.equals("/swipe")
+                    || path.equals("/type") || path.equals("/scroll")
+                    || path.equals("/global");
+        }
+
+        private Response handleLocal(RouteHandler handler, String method, String path,
+                                     Map<String, String> params, String body) {
             try {
-                RouteHandler handler = resolveHandler(path);
-                if (handler == null) {
-                    return errorResponse(404,
-                            "{\"error\":\"not found\",\"path\":\"" + path + "\"}");
-                }
                 String json = handler.handle(method, path, params, body);
-                return newCorsResponse(newFixedLengthResponse(Response.Status.OK, "application/json", json));
+                return cors(newFixedLengthResponse(Response.Status.OK, "application/json; charset=UTF-8", json));
             } catch (Exception e) {
-                Log.e(TAG, "Handler error for " + path, e);
-                return errorResponse(500, e.getMessage());
+                return cors(newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json",
+                        "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}"));
             }
         }
 
-        private RouteHandler resolveHandler(String path) {
-            // UI — screen reading
-            if (path.startsWith("/screen/")) return screenControlHandler;  // /screen/lock etc.
-            if (path.startsWith("/screen")) return screenHandler;         // /screen, /screenshot
+        /**
+         * Proxy request to the internal a11y server on 127.0.0.1:7334.
+         * Strict timeout: 1s connect + 5s read. Returns error JSON on timeout.
+         */
+        private Response proxyToA11y(String method, String path,
+                                     Map<String, String> params, String body) {
+            HttpURLConnection conn = null;
+            try {
+                // Build URL with /a11y prefix and query params
+                StringBuilder urlStr = new StringBuilder("http://127.0.0.1:" + A11Y_PORT + "/a11y" + path);
+                if (!params.isEmpty()) {
+                    urlStr.append('?');
+                    boolean first = true;
+                    for (Map.Entry<String, String> e : params.entrySet()) {
+                        if (!first) urlStr.append('&');
+                        urlStr.append(e.getKey()).append('=').append(e.getValue());
+                        first = false;
+                    }
+                }
 
-            // UI — interaction
-            if (path.equals("/click") || path.equals("/tap") || path.equals("/longpress")
-                    || path.equals("/swipe") || path.equals("/type") || path.equals("/scroll")) {
-                return gestureHandler;
+                conn = (HttpURLConnection) new URL(urlStr.toString()).openConnection();
+                conn.setConnectTimeout(PROXY_CONNECT_TIMEOUT);
+                conn.setReadTimeout(PROXY_READ_TIMEOUT);
+                conn.setRequestMethod(method);
+                conn.setRequestProperty("Content-Type", "application/json");
+
+                if ("POST".equals(method) && body != null && !body.isEmpty()) {
+                    conn.setDoOutput(true);
+                    OutputStream os = conn.getOutputStream();
+                    os.write(body.getBytes("UTF-8"));
+                    os.flush();
+                    os.close();
+                }
+
+                int code = conn.getResponseCode();
+                java.io.InputStream respStream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+                // Read response as raw bytes, then decode as UTF-8 (not platform default)
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                byte[] chunk = new byte[4096];
+                int n;
+                while ((n = respStream.read(chunk)) != -1) baos.write(chunk, 0, n);
+                respStream.close();
+                String responseBody = baos.toString("UTF-8");
+
+                Response.IStatus status = code == 200 ? Response.Status.OK
+                        : code == 404 ? Response.Status.NOT_FOUND
+                        : Response.Status.INTERNAL_ERROR;
+                return newFixedLengthResponse(status, "application/json; charset=UTF-8", responseBody);
+
+            } catch (java.net.SocketTimeoutException e) {
+                Log.w(TAG, "A11y proxy timeout for " + path);
+                return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json",
+                        "{\"error\":\"accessibility timeout\",\"hint\":\"a11y IPC may be stuck, try again in a few seconds\",\"path\":\"" + escapeJson(path) + "\"}");
+            } catch (java.net.ConnectException e) {
+                Log.w(TAG, "A11y proxy connection refused for " + path);
+                return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json",
+                        "{\"error\":\"accessibility service not available\",\"hint\":\"enable accessibility service in Settings\"}");
+            } catch (Exception e) {
+                Log.e(TAG, "A11y proxy error for " + path, e);
+                return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json",
+                        "{\"error\":\"proxy error: " + escapeJson(e.getMessage()) + "\"}");
+            } finally {
+                if (conn != null) conn.disconnect();
             }
-
-            // Global actions
-            if (path.equals("/global")) return globalHandler;
-
-            // System info
-            if (path.equals("/info") || path.equals("/permissions")) return infoHandler;
-
-            // Phase 2 stubs
-            if (path.startsWith("/camera")) return cameraStub;
-            if (path.startsWith("/audio") || path.startsWith("/tts") || path.equals("/volume")) return audioStub;
-            if (path.startsWith("/location")) return locationStub;
-            if (path.startsWith("/sensors")) return sensorStub;
-            if (path.startsWith("/notifications")) return notificationStub;
-            if (path.startsWith("/clipboard")) return clipboardStub;
-            if (path.startsWith("/apps") || path.equals("/intent")) return appStub;
-            if (path.startsWith("/phone") || path.startsWith("/sms")) return phoneStub;
-            if (path.startsWith("/contacts") || path.startsWith("/calendar")) return contactStub;
-            if (path.startsWith("/files")) return fileStub;
-            if (path.equals("/vibrate") || path.equals("/brightness") || path.equals("/torch")) return deviceStub;
-
-            return null;
         }
 
-        private Response errorResponse(int code, String message) {
-            Response.IStatus status = code == 404 ? Response.Status.NOT_FOUND : Response.Status.INTERNAL_ERROR;
-            return newCorsResponse(newFixedLengthResponse(status, "application/json",
-                    "{\"error\":\"" + escapeJson(message) + "\"}"));
+        private Response unauthorized() {
+            return newFixedLengthResponse(Response.Status.UNAUTHORIZED, "application/json",
+                    "{\"error\":\"unauthorized\",\"hint\":\"include X-Bridge-Token header\"}");
         }
 
-        private Response newCorsResponse(Response resp) {
+        private Response cors(Response resp) {
             resp.addHeader("Access-Control-Allow-Origin", "*");
             resp.addHeader("Access-Control-Allow-Headers", "X-Bridge-Token, Content-Type");
             resp.addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
             return resp;
+        }
+
+        /** Read POST body as raw UTF-8 bytes, bypassing NanoHTTPD's broken parseBody. */
+        private String readBodyUtf8(IHTTPSession session) {
+            try {
+                String lenStr = session.getHeaders().get("content-length");
+                if (lenStr == null) return "";
+                int contentLength = Integer.parseInt(lenStr.trim());
+                if (contentLength <= 0 || contentLength > 1024 * 1024) return ""; // 1MB limit
+                byte[] buf = new byte[contentLength];
+                int totalRead = 0;
+                InputStream is = session.getInputStream();
+                while (totalRead < contentLength) {
+                    int read = is.read(buf, totalRead, contentLength - totalRead);
+                    if (read == -1) break;
+                    totalRead += read;
+                }
+                return new String(buf, 0, totalRead, "UTF-8");
+            } catch (Exception e) {
+                return "";
+            }
         }
 
         private String escapeJson(String s) {
@@ -250,9 +294,9 @@ public class BridgeService extends Service {
     private void createNotificationChannel() {
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                getString(R.string.notification_channel_name),
+                "Claw Use Bridge",
                 NotificationManager.IMPORTANCE_LOW);
-        channel.setDescription(getString(R.string.notification_channel_desc));
+        channel.setDescription("HTTP API bridge for AI agent device control");
         NotificationManager nm = getSystemService(NotificationManager.class);
         if (nm != null) nm.createNotificationChannel(channel);
     }
@@ -262,10 +306,9 @@ public class BridgeService extends Service {
         PendingIntent pi = PendingIntent.getActivity(this, 0, intent,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
-        String url = getServerUrl();
         return new Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Claw Use — Bridge Active")
-                .setContentText(url)
+                .setContentText(getServerUrl())
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setContentIntent(pi)
                 .setOngoing(true)
