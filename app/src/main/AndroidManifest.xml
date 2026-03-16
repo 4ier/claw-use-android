@@ -5,6 +5,7 @@
     <!-- Network -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Foreground service -->
@@ -110,6 +111,16 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Notification Action Receiver (copy URL/token) -->
+        <receiver
+            android:name=".NotificationActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.clawuse.android.COPY_URL" />
+                <action android:name="com.clawuse.android.COPY_TOKEN" />
+            </intent-filter>
+        </receiver>
 
         <!-- Boot receiver — auto-start BridgeService -->
         <receiver

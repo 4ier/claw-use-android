@@ -10,8 +10,8 @@ android {
         applicationId = "com.clawuse.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
     }
 
     compileOptions {
@@ -35,6 +35,7 @@ configurations.all {
 dependencies {
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("androidx.core:core:1.12.0")
 }
