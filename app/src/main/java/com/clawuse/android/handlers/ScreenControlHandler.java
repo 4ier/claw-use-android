@@ -9,6 +9,7 @@ import android.graphics.Rect;
 import android.os.Build;
 import android.os.PowerManager;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityNodeInfo;
 
@@ -27,6 +28,7 @@ import java.util.Map;
  * All accessibility tree operations go through SafeA11y for timeout protection.
  */
 public class ScreenControlHandler implements RouteHandler {
+    private static final String TAG = "ScreenControlHandler";
     private static final int A11Y_TIMEOUT = 3000;
     private final Context context;
     private final AccessibilityBridge bridge;
@@ -314,39 +316,93 @@ public class ScreenControlHandler implements RouteHandler {
 
     private void unlockWithPin(AccessibilityBridge b, String pin) throws Exception {
         AccessibilityNodeInfo root = SafeA11y.getRootSafe(b, A11Y_TIMEOUT);
-        if (root == null) return;
 
-        try {
-            for (char digit : pin.toCharArray()) {
-                String digitStr = String.valueOf(digit);
-                AccessibilityNodeInfo digitBtn = SafeA11y.findByTextSafe(b, root, digitStr, A11Y_TIMEOUT);
-                if (digitBtn != null) {
-                    b.clickNode(digitBtn);
-                    digitBtn.recycle();
-                    Thread.sleep(100);
-                }
-                root.recycle();
-                root = SafeA11y.getRootSafe(b, A11Y_TIMEOUT);
-                if (root == null) break;
-            }
-
-            if (root != null) {
-                Thread.sleep(300);
-                root.recycle();
-                root = SafeA11y.getRootSafe(b, A11Y_TIMEOUT);
-                if (root != null) {
-                    AccessibilityNodeInfo enter = SafeA11y.findByDescSafe(b, root, "Enter", A11Y_TIMEOUT);
-                    if (enter == null) enter = SafeA11y.findByTextSafe(b, root, "OK", A11Y_TIMEOUT);
-                    if (enter == null) enter = SafeA11y.findByDescSafe(b, root, "确认", A11Y_TIMEOUT);
-                    if (enter != null) {
-                        b.clickNode(enter);
-                        enter.recycle();
+        // If a11y tree is available, use structured node tapping (preferred)
+        if (root != null) {
+            try {
+                boolean a11yWorked = false;
+                for (char digit : pin.toCharArray()) {
+                    String digitStr = String.valueOf(digit);
+                    AccessibilityNodeInfo digitBtn = SafeA11y.findByTextSafe(b, root, digitStr, A11Y_TIMEOUT);
+                    if (digitBtn != null) {
+                        b.clickNode(digitBtn);
+                        digitBtn.recycle();
+                        a11yWorked = true;
+                        Thread.sleep(100);
                     }
+                    root.recycle();
+                    root = SafeA11y.getRootSafe(b, A11Y_TIMEOUT);
+                    if (root == null) break;
                 }
+
+                if (a11yWorked && root != null) {
+                    Thread.sleep(300);
+                    root.recycle();
+                    root = SafeA11y.getRootSafe(b, A11Y_TIMEOUT);
+                    if (root != null) {
+                        AccessibilityNodeInfo enter = SafeA11y.findByDescSafe(b, root, "Enter", A11Y_TIMEOUT);
+                        if (enter == null) enter = SafeA11y.findByTextSafe(b, root, "OK", A11Y_TIMEOUT);
+                        if (enter == null) enter = SafeA11y.findByDescSafe(b, root, "确认", A11Y_TIMEOUT);
+                        if (enter != null) {
+                            b.clickNode(enter);
+                            enter.recycle();
+                        }
+                    }
+                    return; // a11y path succeeded
+                }
+            } finally {
+                if (root != null) root.recycle();
             }
-        } finally {
-            if (root != null) root.recycle();
         }
+
+        // Fallback: coordinate-based blind PIN input
+        // Standard Android PIN pad layout (3-column, 4-row):
+        //   1 2 3
+        //   4 5 6
+        //   7 8 9
+        //     0
+        // Positioned in bottom ~40% of screen
+        Log.i(TAG, "PIN a11y failed, falling back to coordinate blind input");
+        int screenW = 1080, screenH = 2400;
+        try {
+            WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+            if (wm != null) {
+                DisplayMetrics dm = new DisplayMetrics();
+                wm.getDefaultDisplay().getMetrics(dm);
+                screenW = dm.widthPixels;
+                screenH = dm.heightPixels;
+            }
+        } catch (Exception ignored) {}
+
+        // PIN pad typically occupies y from ~58% to ~92% of screen height
+        // Rows: row0(1-3) ~62%, row1(4-6) ~72%, row2(7-9) ~82%, row3(0) ~92%
+        int colL = screenW / 4;        // left column center
+        int colM = screenW / 2;        // middle column center
+        int colR = screenW * 3 / 4;    // right column center
+        int row0 = (int)(screenH * 0.62);
+        int row1 = (int)(screenH * 0.72);
+        int row2 = (int)(screenH * 0.82);
+        int row3 = (int)(screenH * 0.92);
+
+        int[][] digitCoords = {
+            {colM, row3},                          // 0
+            {colL, row0}, {colM, row0}, {colR, row0}, // 1 2 3
+            {colL, row1}, {colM, row1}, {colR, row1}, // 4 5 6
+            {colL, row2}, {colM, row2}, {colR, row2}  // 7 8 9
+        };
+
+        for (char c : pin.toCharArray()) {
+            int digit = c - '0';
+            if (digit >= 0 && digit <= 9) {
+                b.tap(digitCoords[digit][0], digitCoords[digit][1]);
+                Thread.sleep(150);
+            }
+        }
+        // Some devices auto-submit after correct PIN; wait and check
+        Thread.sleep(500);
+        // Try tapping Enter/OK/确认 at common positions (bottom-right of PIN pad)
+        b.tap(screenW * 3 / 4, (int)(screenH * 0.92));
+        Thread.sleep(500);
     }
 
     private String handleWake() throws Exception {

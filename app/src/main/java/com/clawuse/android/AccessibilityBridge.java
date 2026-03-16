@@ -129,14 +129,32 @@ public class AccessibilityBridge extends AccessibilityService {
     }
 
     /** Find a node by text (case-insensitive partial match). */
+    /**
+     * Find a node by text. Two-pass: exact match first, then contains fallback.
+     * This prevents "eau" matching "nouveau" when an exact "eau" node exists.
+     */
     public AccessibilityNodeInfo findByText(AccessibilityNodeInfo root, String text) {
+        if (root == null || text == null || text.isEmpty()) return null;
+        // Pass 1: exact match (case-insensitive)
+        AccessibilityNodeInfo exact = findByTextPass(root, text, true);
+        if (exact != null) return exact;
+        // Pass 2: contains match (case-insensitive)
+        return findByTextPass(root, text, false);
+    }
+
+    private AccessibilityNodeInfo findByTextPass(AccessibilityNodeInfo root, String text, boolean exactOnly) {
         if (root == null) return null;
         String nodeText = root.getText() != null ? root.getText().toString() : "";
-        if (!text.isEmpty() && nodeText.toLowerCase().contains(text.toLowerCase())) return root;
+        String lower = text.toLowerCase();
+        if (exactOnly) {
+            if (nodeText.toLowerCase().equals(lower)) return root;
+        } else {
+            if (!nodeText.isEmpty() && nodeText.toLowerCase().contains(lower)) return root;
+        }
         for (int i = 0; i < root.getChildCount(); i++) {
             AccessibilityNodeInfo child = root.getChild(i);
             if (child != null) {
-                AccessibilityNodeInfo found = findByText(child, text);
+                AccessibilityNodeInfo found = findByTextPass(child, text, exactOnly);
                 if (found != null) {
                     if (found != child) child.recycle();
                     return found;
