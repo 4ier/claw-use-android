@@ -138,11 +138,39 @@ public class GestureHandler implements RouteHandler {
     }
 
     private String handleSwipe(AccessibilityBridge bridge, JSONObject req) throws Exception {
-        int x1 = req.getInt("x1");
-        int y1 = req.getInt("y1");
-        int x2 = req.getInt("x2");
-        int y2 = req.getInt("y2");
+        String direction = req.optString("direction", "");
         long durationMs = req.optLong("durationMs", 300);
+        
+        int x1, y1, x2, y2;
+        
+        if (!direction.isEmpty()) {
+            // Direction-based swipe: auto-calculate coordinates from screen size
+            android.util.DisplayMetrics dm = bridge.getResources().getDisplayMetrics();
+            int w = dm.widthPixels;
+            int h = dm.heightPixels;
+            int cx = w / 2;
+            int cy = h / 2;
+            int margin = Math.min(w, h) / 6; // swipe distance = ~1/3 of screen
+            
+            switch (direction.toLowerCase()) {
+                case "up":    x1 = cx; y1 = cy + margin; x2 = cx; y2 = cy - margin; break;
+                case "down":  x1 = cx; y1 = cy - margin; x2 = cx; y2 = cy + margin; break;
+                case "left":  x1 = cx + margin; y1 = cy; x2 = cx - margin; y2 = cy; break;
+                case "right": x1 = cx - margin; y1 = cy; x2 = cx + margin; y2 = cy; break;
+                default:
+                    return "{\"error\":\"direction must be up/down/left/right\"}";
+            }
+            
+            // Optional startX/startY override (swipe from a specific point)
+            if (req.has("startX")) { x1 = req.getInt("startX"); x2 = x1 + (x2 - cx); }
+            if (req.has("startY")) { y1 = req.getInt("startY"); y2 = y1 + (y2 - cy); }
+        } else {
+            // Raw coordinate swipe
+            x1 = req.getInt("x1");
+            y1 = req.getInt("y1");
+            x2 = req.getInt("x2");
+            y2 = req.getInt("y2");
+        }
 
         boolean swiped = bridge.swipe(x1, y1, x2, y2, durationMs);
         return new JSONObject()
