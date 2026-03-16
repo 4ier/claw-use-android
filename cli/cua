@@ -183,19 +183,23 @@ cmd_discover() {
   local target_subnet="${1:-}"
   echo -e "${CYAN}Scanning for Claw Use devices...${NC}"
   
-  # Collect subnets to scan
   local subnets=()
   if [ -n "$target_subnet" ]; then
     subnets+=("$target_subnet")
   else
-    # Auto-detect all local subnets
+    # Default: scan 192.168.x subnets (where phones live)
+    # Check which 192.168.x.x subnets we can reach
     while IFS= read -r ip; do
       local subnet=$(echo "$ip" | sed 's/\.[0-9]*$//')
-      # Dedup
       local dup=0
       for s in "${subnets[@]:-}"; do [ "$s" = "$subnet" ] && dup=1; done
       [ "$dup" -eq 0 ] && subnets+=("$subnet")
-    done < <(ip -4 addr show | grep -oP 'inet \K[0-9.]+' | grep -v '^127\.')
+    done < <(ip -4 addr show | grep -oP 'inet \K192\.168\.[0-9.]+')
+    
+    # If no 192.168.x interface, scan common ones
+    if [ ${#subnets[@]} -eq 0 ]; then
+      subnets=("192.168.0" "192.168.1")
+    fi
   fi
   
   for subnet in "${subnets[@]}"; do
@@ -215,7 +219,6 @@ cmd_discover() {
   
   echo ""
   echo "To add: cua add <name> <ip> <token>"
-  echo "Tip: cua discover 192.168.0  (scan specific subnet)"
 }
 
 cmd_ping() {
