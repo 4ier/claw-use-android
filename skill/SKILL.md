@@ -2,7 +2,7 @@
 
 Give your AI agent eyes, hands, and a voice on a real Android phone.
 
-`claw-use-android` is an Android app + CLI (`cua`) that exposes 26 HTTP endpoints for full phone control. No ADB, no root, no PC.
+`claw-use-android` is an Android app + CLI (`cua`) that exposes 37 HTTP endpoints for full phone control. No ADB, no root, no PC.
 
 ## Setup
 
@@ -57,6 +57,27 @@ cua intent '<json>'     # fire Android Intent
 ```bash
 cua tts "hello"         # speak through phone speaker
 cua say "你好"          # alias
+```
+
+### Device I/O (v1.7.0+)
+```bash
+cua clipboard           # read clipboard
+cua clipboard "text"    # write to clipboard
+cua camera [front|back] [quality] [output.jpg]  # take photo
+cua volume              # read all volumes
+cua volume media 10     # set media volume
+cua volume media up     # adjust volume
+cua battery             # battery status
+cua wifi                # WiFi info
+cua location            # GPS/network location
+cua vibrate [ms]        # vibrate (default 200ms)
+cua contacts [search]   # list/search contacts
+cua sms list [limit]    # read SMS
+cua sms send <number> <message>  # send SMS
+cua file list [path]    # list directory
+cua file read <path>    # read file
+cua file write <path> <content>  # write file
+cua file delete <path>  # delete file
 ```
 
 ### Device State
