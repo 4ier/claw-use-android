@@ -1,8 +1,8 @@
 # 🤖 Claw Use Android
 
-**Turn any Android phone into an AI-controllable device. No ADB. No root. No PC. Just HTTP.**
+**The Android implementation of [Claw Use](https://github.com/4ier/claw-use-android#claw-use-protocol) — a protocol for AI agents to control real devices.**
 
-One app. 25 API endpoints. Full phone control over WiFi.
+One app. 25 API endpoints. Full phone control over HTTP. No ADB. No root. No PC.
 
 ```bash
 # See the screen
@@ -262,6 +262,21 @@ cd claw-use-android
 ./gradlew assembleDebug
 # APK at app/build/outputs/apk/debug/app-debug.apk
 ```
+
+## Claw Use Protocol
+
+Claw Use Android is the first implementation of the **Claw Use protocol** — a standard HTTP API for AI agents to control physical devices.
+
+The protocol defines a common set of endpoints (`/screen`, `/screenshot`, `/tap`, `/type`, `/tts`, etc.) that any device can implement. The same `cu` CLI and agent skills work across all compliant devices:
+
+```bash
+cu add redmi 192.168.0.105 <token>     # Android phone
+cu add ipad 100.80.1.10 <token>        # future: iOS
+cu add laptop 100.80.1.20 <token>      # future: desktop
+cu -d redmi screenshot                  # same command, any device
+```
+
+Want to add Claw Use support for a new platform? Implement the HTTP endpoints documented above, return JSON, support token auth. The ecosystem comes free.
 
 ## License
 
