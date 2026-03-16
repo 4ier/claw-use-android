@@ -50,11 +50,20 @@ public class InfoHandler implements RouteHandler {
         }
     }
 
+    private String getVersionName() {
+        try {
+            return context.getPackageManager()
+                    .getPackageInfo(context.getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
     private String handlePing() throws Exception {
         return new JSONObject()
                 .put("status", "ok")
                 .put("service", "claw-use-android")
-                .put("version", "1.6.3")
+                .put("version", getVersionName())
                 .toString();
     }
 

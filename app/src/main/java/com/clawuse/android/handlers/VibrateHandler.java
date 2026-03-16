@@ -34,7 +34,7 @@ public class VibrateHandler implements RouteHandler {
         }
 
         if (vibrator == null || !vibrator.hasVibrator()) {
-            return "{\"error\":\"vibrator not available\"}";
+            return "{\"error\":\"device has no vibrator hardware\"}";
         }
 
         JSONObject req = body != null && !body.isEmpty() ? new JSONObject(body) : new JSONObject();

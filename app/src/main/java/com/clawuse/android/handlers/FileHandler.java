@@ -87,6 +87,15 @@ public class FileHandler implements RouteHandler {
 
         try (FileOutputStream fos = new FileOutputStream(file)) {
             fos.write(data);
+        } catch (java.io.FileNotFoundException e) {
+            String msg = e.getMessage();
+            if (msg != null && msg.contains("EPERM")) {
+                return new JSONObject()
+                        .put("error", "permission denied: " + filePath)
+                        .put("hint", "Android 11+ Scoped Storage restricts /sdcard root. Use /sdcard/Download/ or app private dir instead.")
+                        .toString();
+            }
+            throw e;
         }
 
         return new JSONObject()

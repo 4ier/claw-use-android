@@ -34,28 +34,43 @@ public class ClipboardHandler implements RouteHandler {
 
     private String readClipboard() throws Exception {
         final AtomicReference<String> result = new AtomicReference<>(null);
+        final AtomicReference<String> errorRef = new AtomicReference<>(null);
         final CountDownLatch latch = new CountDownLatch(1);
 
         new Handler(Looper.getMainLooper()).post(() -> {
             try {
                 ClipboardManager cm = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
-                if (cm != null && cm.hasPrimaryClip()) {
+                if (cm == null) {
+                    errorRef.set("clipboard service unavailable");
+                } else if (!cm.hasPrimaryClip()) {
+                    result.set(""); // empty clipboard
+                } else {
                     ClipData clip = cm.getPrimaryClip();
                     if (clip != null && clip.getItemCount() > 0) {
                         CharSequence text = clip.getItemAt(0).coerceToText(context);
                         result.set(text != null ? text.toString() : "");
+                    } else {
+                        result.set("");
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                errorRef.set(e.getMessage());
+            }
             latch.countDown();
         });
 
-        latch.await(3, TimeUnit.SECONDS);
-        String text = result.get();
+        boolean completed = latch.await(3, TimeUnit.SECONDS);
+        if (!completed) return "{\"error\":\"clipboard read timeout\"}";
 
+        String err = errorRef.get();
+        if (err != null) return "{\"error\":\"" + err + "\",\"hint\":\"Android 10+ restricts clipboard read for background apps\"}";
+
+        String text = result.get();
         JSONObject json = new JSONObject();
         json.put("text", text != null ? text : "");
         json.put("hasContent", text != null && !text.isEmpty());
+        // Note: Android 10+ may return empty for background apps even if clipboard has content
+        json.put("note", "Android 10+ restricts clipboard read to foreground apps");
         return json.toString();
     }
 

@@ -444,11 +444,19 @@ public class BridgeService extends Service {
 
         // ── /status handler ─────────────────────────────────────
 
+        private String getVersionName() {
+            try {
+                return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            } catch (Exception e) {
+                return "unknown";
+            }
+        }
+
         private Response handleStatus() {
             try {
                 JSONObject j = StatusTracker.get().toJson();
                 j.put("status", StatusTracker.get().isA11yAlive() ? "ok" : "degraded");
-                j.put("version", "1.7.0");
+                j.put("version", getVersionName());
 
                 // Device info
                 JSONObject device = new JSONObject();
