@@ -291,7 +291,8 @@ public class BridgeService extends Service {
 
             String pin = configStore.getPin();
             String pattern = configStore.getPattern();
-            if ((pin == null || pin.isEmpty()) && (pattern == null || pattern.isEmpty())) return false; // no credential, can't auto-unlock
+            String unlockType = configStore.getUnlockType();
+            if ((pin == null || pin.isEmpty()) && (pattern == null || pattern.isEmpty())) return false;
 
             // Proxy unlock request to a11y server
             HttpURLConnection conn = (HttpURLConnection)
@@ -301,12 +302,16 @@ public class BridgeService extends Service {
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);
-            // Send whichever credential is available
+            // Respect unlockType preference; default to PIN (proven reliable)
             String body;
-            if (pattern != null && !pattern.isEmpty()) {
+            if ("pattern".equals(unlockType) && pattern != null && !pattern.isEmpty()) {
+                body = "{\"pattern\":\"" + pattern + "\"}";
+            } else if (pin != null && !pin.isEmpty()) {
+                body = "{\"pin\":\"" + pin + "\"}";
+            } else if (pattern != null && !pattern.isEmpty()) {
                 body = "{\"pattern\":\"" + pattern + "\"}";
             } else {
-                body = "{\"pin\":\"" + pin + "\"}";
+                return false;
             }
             OutputStream os = conn.getOutputStream();
             os.write(body.getBytes("UTF-8"));
@@ -399,9 +404,7 @@ public class BridgeService extends Service {
                 // Auto-unlock before a11y operations (Task 7)
                 KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
                 boolean locked = km != null && km.isKeyguardLocked();
-                if (locked && !path.contains("/screen/") && !path.contains("/screenshot")
-                        && !path.contains("/swipe") && !path.contains("/tap")
-                        && !path.contains("/global")) {
+                if (locked && !path.contains("/screen/")) {
                     if (configStore.hasUnlockCredential()) {
                         boolean unlocked = ensureUnlocked();
                         if (!unlocked) {
@@ -429,7 +432,7 @@ public class BridgeService extends Service {
             try {
                 JSONObject j = StatusTracker.get().toJson();
                 j.put("status", StatusTracker.get().isA11yAlive() ? "ok" : "degraded");
-                j.put("version", "1.6.2");
+                j.put("version", "1.6.3");
 
                 // Device info
                 JSONObject device = new JSONObject();
