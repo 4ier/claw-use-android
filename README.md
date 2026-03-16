@@ -137,11 +137,12 @@ curl http://<phone-ip>:7333/ping
 # → {"status":"ok","service":"claw-use-android","version":"1.2.0"}
 ```
 
-### 5. Set PIN for Remote Unlock
+### 5. Tell It Your PIN (for Remote Unlock)
 ```bash
+# This remembers your existing lock screen PIN — it does NOT change it
 curl -X POST http://<phone-ip>:7333/config \
   -H "X-Bridge-Token: <token>" \
-  -d '{"pin":"your-pin"}'
+  -d '{"pin":"your-existing-pin"}'
 ```
 
 ## Remote Access (Tailscale)

@@ -390,7 +390,11 @@ cmd_config() {
   case "$subcmd" in
     get) _api GET /config | _jq_or_raw ;;
     set) _api_json POST /config -d "$1" | _jq_or_raw ;;
-    pin) _api_json POST /config -d "{\"pin\":\"$1\"}" | _jq_or_raw ;;
+    pin) 
+      [ -n "${1:-}" ] || _err "Usage: cua config pin <your-lockscreen-pin>
+  Tell the app your phone's lock screen PIN so it can unlock remotely.
+  This does NOT change your PIN — it just remembers it for auto-unlock."
+      _api_json POST /config -d "{\"pin\":\"$1\"}" | _jq_or_raw ;;
     *) _err "Usage: cua config get|set|pin" ;;
   esac
 }
