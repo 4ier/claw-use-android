@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cu — Claw Use CLI
+# cua — Claw Use CLI
 # Control Android phones via Claw Use HTTP API
 # Usage: cu <command> [args...]
 
@@ -37,7 +37,7 @@ _load_device() {
 # Resolve device: env CU_DEVICE > --device flag > default config
 _resolve_device() {
   if [ -n "$CU_DEVICE" ]; then
-    _load_device "$CU_DEVICE" || _err "Unknown device: $CU_DEVICE. Run 'cu devices' to list."
+    _load_device "$CU_DEVICE" || _err "Unknown device: $CU_DEVICE. Run 'cua devices' to list."
   fi
 }
 
@@ -49,8 +49,8 @@ _ok() { echo -e "${GREEN}$*${NC}"; }
 
 _require_config() {
   _resolve_device
-  [ -n "$CU_HOST" ] || _err "CU_HOST not set. Run: cu add <name> <ip> <token>"
-  [ -n "$CU_TOKEN" ] || _err "CU_TOKEN not set. Run: cu add <name> <ip> <token>"
+  [ -n "$CU_HOST" ] || _err "CU_HOST not set. Run: cua add <name> <ip> <token>"
+  [ -n "$CU_TOKEN" ] || _err "CU_TOKEN not set. Run: cua add <name> <ip> <token>"
 }
 
 _api() {
@@ -78,9 +78,9 @@ _jq_or_raw() {
 }
 
 cmd_setup() {
-  # Legacy: cu setup <ip> <token> → saves as default
+  # Legacy: cua setup <ip> <token> → saves as default
   local host="${1:-}" token="${2:-}"
-  [ -n "$host" ] && [ -n "$token" ] || _err "Usage: cu setup <ip> <token>  (or use: cu add <name> <ip> <token>)"
+  [ -n "$host" ] && [ -n "$token" ] || _err "Usage: cua setup <ip> <token>  (or use: cua add <name> <ip> <token>)"
   mkdir -p "$CONFIG_DIR"
   cat > "$CONFIG_FILE" <<EOF
 CU_HOST="$host"
@@ -99,7 +99,7 @@ EOF
 
 cmd_add() {
   local name="${1:-}" host="${2:-}" token="${3:-}"
-  [ -n "$name" ] && [ -n "$host" ] && [ -n "$token" ] || _err "Usage: cu add <name> <ip> <token>"
+  [ -n "$name" ] && [ -n "$host" ] && [ -n "$token" ] || _err "Usage: cua add <name> <ip> <token>"
   mkdir -p "$CONFIG_DIR"
   touch "$DEVICES_FILE"
   chmod 600 "$DEVICES_FILE"
@@ -127,7 +127,7 @@ cmd_add() {
 
 cmd_devices() {
   if [ ! -f "$DEVICES_FILE" ] || [ ! -s "$DEVICES_FILE" ]; then
-    echo "No devices configured. Run: cu add <name> <ip> <token>"
+    echo "No devices configured. Run: cua add <name> <ip> <token>"
     return
   fi
   
@@ -153,10 +153,10 @@ cmd_devices() {
 
 cmd_use() {
   local name="${1:-}"
-  [ -n "$name" ] || _err "Usage: cu use <device-name>"
+  [ -n "$name" ] || _err "Usage: cua use <device-name>"
   
   if ! _load_device "$name"; then
-    _err "Unknown device: $name. Run 'cu devices' to list."
+    _err "Unknown device: $name. Run 'cua devices' to list."
   fi
   
   mkdir -p "$CONFIG_DIR"
@@ -170,7 +170,7 @@ EOF
 
 cmd_rm() {
   local name="${1:-}"
-  [ -n "$name" ] || _err "Usage: cu rm <device-name>"
+  [ -n "$name" ] || _err "Usage: cua rm <device-name>"
   if [ -f "$DEVICES_FILE" ]; then
     sed -i "/^${name}|/d" "$DEVICES_FILE"
     _ok "Removed '$name'"
@@ -349,31 +349,31 @@ cmd_config() {
     get) _api GET /config | _jq_or_raw ;;
     set) _api_json POST /config -d "$1" | _jq_or_raw ;;
     pin) _api_json POST /config -d "{\"pin\":\"$1\"}" | _jq_or_raw ;;
-    *) _err "Usage: cu config get|set|pin" ;;
+    *) _err "Usage: cua config get|set|pin" ;;
   esac
 }
 
 cmd_help() {
   cat <<'EOF'
-cu — Claw Use CLI
+cua — Claw Use Android CLI
 
 DEVICE MANAGEMENT
-  cu add <name> <ip> <token>  Add a device with alias
-  cu devices                  List all devices (with online status)
-  cu use <name>               Set default device
-  cu rm <name>                Remove a device
-  cu setup <ip> <token>       Quick setup (legacy, no alias)
+  cua add <name> <ip> <token>  Add a device with alias
+  cua devices                  List all devices (with online status)
+  cua use <name>               Set default device
+  cua rm <name>                Remove a device
+  cua setup <ip> <token>       Quick setup (legacy, no alias)
 
 GLOBAL FLAGS
   -d, --device <name>         Target a specific device for this command
-                              e.g. cu -d pixel screenshot
+                              e.g. cua -d pixel screenshot
 
 PERCEPTION
   cu ping                   Health check
   cu info                   Device info
   cu status                 Full health dashboard
   cu screen [-c] [-t ms]    Read UI tree (-c = compact)
-  cu screenshot [q] [w] [f] Screenshot (quality, maxWidth, output file)
+  cua screenshot [q] [w] [f] Screenshot (quality, maxWidth, output file)
   cu notifications          List notifications
 
 ACTION
@@ -398,7 +398,7 @@ DEVICE
   cu wake                   Wake screen
   cu lock                   Lock device
   cu unlock                 Unlock (requires PIN configured)
-  cu config get|set|pin     Read/write device config
+  cua config get|set|pin     Read/write device config
 
 ENV VARS
   CU_HOST      Phone IP/hostname (overrides device config)
@@ -407,12 +407,12 @@ ENV VARS
   CU_TIMEOUT   Request timeout in seconds (default: 10)
 
 EXAMPLES
-  cu add redmi 192.168.0.105 abc123     # add device
-  cu add pixel 100.80.1.5 def456        # add another
-  cu devices                             # list all
-  cu -d pixel screenshot                 # screenshot from pixel
-  cu use redmi                           # switch default
-  cu say "hello"                         # speak on default device
+  cua add redmi 192.168.0.105 abc123     # add device
+  cua add pixel 100.80.1.5 def456        # add another
+  cua devices                             # list all
+  cua -d pixel screenshot                 # screenshot from pixel
+  cua use redmi                           # switch default
+  cua say "hello"                         # speak on default device
 EOF
 }
 
@@ -457,5 +457,5 @@ case "$cmd" in
   unlock) cmd_unlock ;;
   config) cmd_config "$@" ;;
   help|--help|-h) cmd_help ;;
-  *) _err "Unknown command: $cmd. Run 'cu help' for usage." ;;
+  *) _err "Unknown command: $cmd. Run 'cua help' for usage." ;;
 esac

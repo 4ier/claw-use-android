@@ -270,10 +270,10 @@ Claw Use Android is the first implementation of the **Claw Use protocol** — a 
 The protocol defines a common set of endpoints (`/screen`, `/screenshot`, `/tap`, `/type`, `/tts`, etc.) that any device can implement. The same `cu` CLI and agent skills work across all compliant devices:
 
 ```bash
-cu add redmi 192.168.0.105 <token>     # Android phone
-cu add ipad 100.80.1.10 <token>        # future: iOS
-cu add laptop 100.80.1.20 <token>      # future: desktop
-cu -d redmi screenshot                  # same command, any device
+cua add redmi 192.168.0.105 <token>     # Android phone
+cua add ipad 100.80.1.10 <token>        # future: iOS
+cua add laptop 100.80.1.20 <token>      # future: desktop
+cua -d redmi screenshot                  # same command, any device
 ```
 
 Want to add Claw Use support for a new platform? Implement the HTTP endpoints documented above, return JSON, support token auth. The ecosystem comes free.
