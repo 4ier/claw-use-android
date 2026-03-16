@@ -2,7 +2,7 @@
 
 **The Android implementation of [Claw Use](https://github.com/4ier/claw-use-android#claw-use-protocol) — a protocol for AI agents to control real devices.**
 
-One app. 25 API endpoints. Full phone control over HTTP. No ADB. No root. No PC.
+One app. 37 API endpoints. Full phone control over HTTP. No ADB. No root. No PC.
 
 ```bash
 # See the screen
@@ -16,8 +16,23 @@ curl -X POST http://phone:7333/tap -d '{"x":500,"y":1000}'
 curl -X POST http://phone:7333/type -d '{"text":"Hello world"}'
 curl -X POST http://phone:7333/swipe -d '{"direction":"up"}'
 
-# Speak through the phone
+# Speak, record, snap
 curl -X POST http://phone:7333/tts -d '{"text":"I can talk now"}'
+curl -X POST http://phone:7333/audio/record -d '{"durationMs":5000}'
+curl -X POST http://phone:7333/camera -d '{"facing":"back"}'
+
+# Read sensors & system state
+curl http://phone:7333/battery
+curl http://phone:7333/wifi
+curl http://phone:7333/location
+curl http://phone:7333/clipboard
+curl http://phone:7333/volume
+
+# Read/write files, contacts, SMS
+curl http://phone:7333/file/list?path=/sdcard/DCIM
+curl http://phone:7333/contacts?search=John
+curl http://phone:7333/sms?limit=5
+curl -X POST http://phone:7333/sms -d '{"to":"1234567","message":"Hi"}'
 
 # Launch apps, fire intents, read notifications
 curl -X POST http://phone:7333/launch -d '{"package":"com.whatsapp"}'
@@ -71,6 +86,28 @@ Built for AI agents that need a real phone — not an emulator, not a cloud devi
 |----------|--------|-------------|
 | `/tts` | POST | Speak text through the phone speaker |
 | `/tts/voices` | GET | List available TTS voices |
+| `/audio/record` | POST | Record audio from microphone |
+
+### 📱 Device I/O
+| Endpoint | Method | What it does |
+|----------|--------|-------------|
+| `/clipboard` | GET/POST | Read or write clipboard text |
+| `/camera` | POST | Capture photo (front/back, quality, max width) |
+| `/volume` | GET/POST | Read/set volume for all audio streams |
+| `/battery` | GET | Battery level, charging status, temperature |
+| `/wifi` | GET | WiFi connection info (SSID, IP, signal) |
+| `/location` | GET | GPS/network location with fallback |
+| `/vibrate` | POST | Vibrate the device (one-shot or pattern) |
+| `/contacts` | GET | Search and list contacts |
+| `/sms` | GET/POST | Read inbox/sent messages, send SMS |
+| `/file` | GET/POST/DELETE | Read, write, delete files on device |
+| `/file/list` | GET | List directory contents |
+
+### ⚡ Batch & Flow
+| Endpoint | Method | What it does |
+|----------|--------|-------------|
+| `/batch` | POST | Execute multiple operations in one request |
+| `/flow` | POST | Multi-step automation with conditions |
 
 ### 🔒 Security & Device
 | Endpoint | Method | What it does |
