@@ -122,6 +122,15 @@
             </intent-filter>
         </receiver>
 
+        <!-- Auto-restart after app update (self-update loop) -->
+        <receiver
+            android:name=".UpdateReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <!-- Boot receiver — auto-start BridgeService -->
         <receiver
             android:name=".BootReceiver"
