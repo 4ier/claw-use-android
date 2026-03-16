@@ -25,6 +25,14 @@ curl -X POST http://phone:7333/intent -d '{"action":"android.intent.action.CALL"
 curl http://phone:7333/notifications
 ```
 
+## Use Cases
+
+- **AI agent with a real phone**: Your agent can send messages, check apps, take screenshots, and speak — on a real device with real accounts
+- **Revive broken phones**: USB port dead? Screen cracked? If WiFi works, Claw Use gives the phone a second life. No ADB needed, no screen needed — the AI sees through `/screenshot`
+- **Remote phone access**: Add Tailscale and control your phone from anywhere in the world
+- **Spare phone automation**: Turn that old phone in your drawer into a dedicated AI worker
+- **Testing & QA**: Automate real-device testing without emulators
+
 ## Why This Exists
 
 Every phone control solution requires a PC running ADB. **This one doesn't.**
