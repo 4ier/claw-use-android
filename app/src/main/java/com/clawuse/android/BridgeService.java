@@ -421,7 +421,7 @@ public class BridgeService extends Service {
             try {
                 JSONObject j = StatusTracker.get().toJson();
                 j.put("status", StatusTracker.get().isA11yAlive() ? "ok" : "degraded");
-                j.put("version", "1.3.0");
+                j.put("version", "1.4.0");
 
                 // Device info
                 JSONObject device = new JSONObject();
@@ -490,7 +490,7 @@ public class BridgeService extends Service {
             return path.startsWith("/screen") || path.equals("/click") || path.equals("/tap")
                     || path.equals("/longpress") || path.equals("/swipe")
                     || path.equals("/type") || path.equals("/scroll")
-                    || path.equals("/global");
+                    || path.equals("/global") || path.equals("/flow");
         }
 
         private Response handleLocal(RouteHandler handler, String method, String path,
@@ -527,9 +527,9 @@ public class BridgeService extends Service {
 
                 conn = (HttpURLConnection) new URL(urlStr.toString()).openConnection();
                 conn.setConnectTimeout(PROXY_CONNECT_TIMEOUT);
-                // TTS and unlock need more time
+                // TTS, unlock, and flow need more time
                 int readTimeout = (path.contains("/tts") || path.contains("/unlock"))
-                        ? 35000 : PROXY_READ_TIMEOUT;
+                        ? 35000 : path.equals("/flow") ? 310_000 : PROXY_READ_TIMEOUT;
                 conn.setReadTimeout(readTimeout);
                 conn.setRequestMethod(method);
                 conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");

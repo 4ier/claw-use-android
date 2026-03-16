@@ -54,7 +54,7 @@ public class InfoHandler implements RouteHandler {
         return new JSONObject()
                 .put("status", "ok")
                 .put("service", "claw-use-android")
-                .put("version", "1.3.0")
+                .put("version", "1.4.0")
                 .toString();
     }
 

@@ -28,6 +28,7 @@ public class A11yInternalServer extends NanoHTTPD {
     private final NotificationHandler notificationHandler;
     private final IntentHandler intentHandler;
     private final AudioHandler audioHandler;
+    private final FlowHandler flowHandler;
 
     public A11yInternalServer(AccessibilityBridge bridge) {
         super("127.0.0.1", 7334);
@@ -40,6 +41,7 @@ public class A11yInternalServer extends NanoHTTPD {
         this.notificationHandler = new NotificationHandler();
         this.intentHandler = new IntentHandler();
         this.audioHandler = new AudioHandler(bridge);
+        this.flowHandler = new FlowHandler(bridge);
     }
 
     @Override
@@ -95,6 +97,8 @@ public class A11yInternalServer extends NanoHTTPD {
         if ("/a11y/intent".equals(path)) return intentHandler;
 
         if (path.startsWith("/a11y/tts")) return audioHandler;
+
+        if ("/a11y/flow".equals(path)) return flowHandler;
 
         return null;
     }

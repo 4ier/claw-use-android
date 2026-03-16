@@ -62,41 +62,50 @@ public class GestureHandler implements RouteHandler {
         String text = req.optString("text", "");
         String id = req.optString("id", "");
         String desc = req.optString("desc", "");
+        int retry = req.optInt("retry", 0);
+        int retryMs = req.optInt("retryMs", 1000);
 
         if (text.isEmpty() && id.isEmpty() && desc.isEmpty()) {
             return "{\"error\":\"provide 'text', 'id', or 'desc'\"}";
         }
 
-        AccessibilityNodeInfo root = SafeA11y.getRootSafe(bridge, A11Y_TIMEOUT);
-        if (root == null) return "{\"error\":\"no active window (timed out)\"}";
+        // Retry loop: poll for element to appear
+        for (int attempt = 0; attempt <= retry; attempt++) {
+            if (attempt > 0) Thread.sleep(retryMs);
 
-        try {
-            AccessibilityNodeInfo target = null;
-            if (!text.isEmpty()) target = SafeA11y.findByTextSafe(bridge, root, text, A11Y_TIMEOUT);
-            if (target == null && !id.isEmpty()) target = SafeA11y.findByIdSafe(bridge, root, id, A11Y_TIMEOUT);
-            if (target == null && !desc.isEmpty()) target = SafeA11y.findByDescSafe(bridge, root, desc, A11Y_TIMEOUT);
+            AccessibilityNodeInfo root = SafeA11y.getRootSafe(bridge, A11Y_TIMEOUT);
+            if (root == null) continue;
 
-            if (target == null) {
-                return "{\"error\":\"element not found\",\"text\":\"" + escapeJson(text) +
-                        "\",\"id\":\"" + escapeJson(id) + "\",\"desc\":\"" + escapeJson(desc) + "\"}";
+            try {
+                AccessibilityNodeInfo target = null;
+                if (!text.isEmpty()) target = SafeA11y.findByTextSafe(bridge, root, text, A11Y_TIMEOUT);
+                if (target == null && !id.isEmpty()) target = SafeA11y.findByIdSafe(bridge, root, id, A11Y_TIMEOUT);
+                if (target == null && !desc.isEmpty()) target = SafeA11y.findByDescSafe(bridge, root, desc, A11Y_TIMEOUT);
+
+                if (target != null) {
+                    Rect bounds = new Rect();
+                    target.getBoundsInScreen(bounds);
+                    boolean clicked = bridge.clickNode(target);
+                    target.recycle();
+
+                    JSONObject result = new JSONObject();
+                    result.put("clicked", clicked);
+                    result.put("x", bounds.centerX());
+                    result.put("y", bounds.centerY());
+                    if (!text.isEmpty()) result.put("matchedText", text);
+                    if (!id.isEmpty()) result.put("matchedId", id);
+                    if (!desc.isEmpty()) result.put("matchedDesc", desc);
+                    if (attempt > 0) result.put("attempts", attempt + 1);
+                    return result.toString();
+                }
+            } finally {
+                root.recycle();
             }
-
-            Rect bounds = new Rect();
-            target.getBoundsInScreen(bounds);
-            boolean clicked = bridge.clickNode(target);
-            target.recycle();
-
-            JSONObject result = new JSONObject();
-            result.put("clicked", clicked);
-            result.put("x", bounds.centerX());
-            result.put("y", bounds.centerY());
-            if (!text.isEmpty()) result.put("matchedText", text);
-            if (!id.isEmpty()) result.put("matchedId", id);
-            if (!desc.isEmpty()) result.put("matchedDesc", desc);
-            return result.toString();
-        } finally {
-            root.recycle();
         }
+
+        return "{\"error\":\"element not found\",\"text\":\"" + escapeJson(text) +
+                "\",\"id\":\"" + escapeJson(id) + "\",\"desc\":\"" + escapeJson(desc) +
+                "\",\"attempts\":" + (retry + 1) + "}";
     }
 
     private String handleTap(AccessibilityBridge bridge, JSONObject req) throws Exception {

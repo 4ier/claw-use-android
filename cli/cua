@@ -353,6 +353,14 @@ cmd_tts() {
   CU_TIMEOUT=35 _api_json POST /tts -d "{\"text\":\"$text\"}" | _jq_or_raw
 }
 
+cmd_flow() {
+  _require_config
+  # Pass raw JSON body
+  local body="${1:-}"
+  [ -n "$body" ] || _err "Usage: cua flow '{\"steps\":[{\"wait\":\"text\",\"then\":\"tap\"}]}'"
+  CU_TIMEOUT=310 _api_json POST /flow -d "$body" | _jq_or_raw
+}
+
 cmd_intent() {
   _require_config
   # Pass raw JSON body
@@ -496,6 +504,7 @@ case "$cmd" in
   recents) cmd_recents ;;
   launch) cmd_launch "$@" ;;
   tts|say) cmd_tts "$@" ;;
+  flow) cmd_flow "$@" ;;
   intent) cmd_intent "$@" ;;
   call) cmd_call "$@" ;;
   open) cmd_open "$@" ;;
