@@ -290,7 +290,8 @@ public class BridgeService extends Service {
             if (!screenOff && !locked) return true; // already unlocked
 
             String pin = configStore.getPin();
-            if (pin == null || pin.isEmpty()) return false; // no PIN, can't auto-unlock
+            String pattern = configStore.getPattern();
+            if ((pin == null || pin.isEmpty()) && (pattern == null || pattern.isEmpty())) return false; // no credential, can't auto-unlock
 
             // Proxy unlock request to a11y server
             HttpURLConnection conn = (HttpURLConnection)
@@ -300,7 +301,13 @@ public class BridgeService extends Service {
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setDoOutput(true);
-            String body = "{\"pin\":\"" + pin + "\"}";
+            // Send whichever credential is available
+            String body;
+            if (pattern != null && !pattern.isEmpty()) {
+                body = "{\"pattern\":\"" + pattern + "\"}";
+            } else {
+                body = "{\"pin\":\"" + pin + "\"}";
+            }
             OutputStream os = conn.getOutputStream();
             os.write(body.getBytes("UTF-8"));
             os.flush();
@@ -394,12 +401,12 @@ public class BridgeService extends Service {
                 boolean locked = km != null && km.isKeyguardLocked();
                 if (locked && !path.contains("/screen/unlock") && !path.contains("/screen/state")
                         && !path.contains("/screen/wake")) {
-                    if (configStore.hasPin()) {
+                    if (configStore.hasUnlockCredential()) {
                         boolean unlocked = ensureUnlocked();
                         if (!unlocked) {
                             return cors(newFixedLengthResponse(Response.Status.INTERNAL_ERROR,
                                     "application/json; charset=UTF-8",
-                                    "{\"error\":\"device locked, auto-unlock failed\",\"hint\":\"check PIN via POST /config\"}"));
+                                    "{\"error\":\"device locked, auto-unlock failed\",\"hint\":\"check PIN/pattern via POST /config\"}"));
                         }
                     } else {
                         return cors(newFixedLengthResponse(Response.Status.INTERNAL_ERROR,
@@ -421,7 +428,7 @@ public class BridgeService extends Service {
             try {
                 JSONObject j = StatusTracker.get().toJson();
                 j.put("status", StatusTracker.get().isA11yAlive() ? "ok" : "degraded");
-                j.put("version", "1.4.0");
+                j.put("version", "1.5.0");
 
                 // Device info
                 JSONObject device = new JSONObject();
@@ -471,6 +478,10 @@ public class BridgeService extends Service {
                 JSONObject req = body != null && !body.isEmpty() ? new JSONObject(body) : new JSONObject();
                 if (req.has("pin")) {
                     configStore.setPin(req.getString("pin"));
+                    configStore.setUnlockType("pin");
+                }
+                if (req.has("pattern")) {
+                    configStore.setPattern(req.getString("pattern"));
                 }
                 if (req.has("screenTimeout")) {
                     configStore.setScreenTimeout(req.getInt("screenTimeout"));

@@ -15,6 +15,8 @@ import org.json.JSONObject;
 public class ConfigStore {
     private static final String PREFS_NAME = "claw_use_config_encrypted";
     private static final String KEY_PIN = "device_pin";
+    private static final String KEY_UNLOCK_TYPE = "unlock_type";  // "pin", "password", "pattern"
+    private static final String KEY_PATTERN = "device_pattern";   // pattern as "2,5,6,3,9,8"
     private static final String KEY_SCREEN_TIMEOUT = "screen_timeout_sec";
 
     private static volatile ConfigStore instance;
@@ -63,6 +65,38 @@ public class ConfigStore {
         prefs.edit().remove(KEY_PIN).apply();
     }
 
+    // Pattern unlock support
+    public void setUnlockType(String type) {
+        prefs.edit().putString(KEY_UNLOCK_TYPE, type).apply();
+    }
+
+    public String getUnlockType() {
+        // Auto-detect: if pattern is set, it's pattern; if pin is set, it's pin
+        String type = prefs.getString(KEY_UNLOCK_TYPE, null);
+        if (type != null) return type;
+        if (hasPattern()) return "pattern";
+        if (hasPin()) return "pin";
+        return null;
+    }
+
+    public void setPattern(String pattern) {
+        prefs.edit().putString(KEY_PATTERN, pattern).apply();
+        prefs.edit().putString(KEY_UNLOCK_TYPE, "pattern").apply();
+    }
+
+    public String getPattern() {
+        return prefs.getString(KEY_PATTERN, null);
+    }
+
+    public boolean hasPattern() {
+        String p = getPattern();
+        return p != null && !p.isEmpty();
+    }
+
+    public boolean hasUnlockCredential() {
+        return hasPin() || hasPattern();
+    }
+
     public void setScreenTimeout(int seconds) {
         prefs.edit().putInt(KEY_SCREEN_TIMEOUT, seconds).apply();
     }
@@ -75,6 +109,8 @@ public class ConfigStore {
         try {
             JSONObject j = new JSONObject();
             j.put("hasPin", hasPin());
+            j.put("hasPattern", hasPattern());
+            j.put("unlockType", getUnlockType());
             j.put("screenTimeout", getScreenTimeout());
             return j;
         } catch (Exception e) {
