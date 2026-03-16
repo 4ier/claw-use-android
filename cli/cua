@@ -407,6 +407,60 @@ cmd_config() {
   esac
 }
 
+cmd_setup_perms() {
+  _require_config
+  echo "Opening app permissions for Claw Use..."
+  
+  # Open app details settings
+  _api_json POST /intent -d '{"action":"android.settings.APPLICATION_DETAILS_SETTINGS","uri":"package:com.clawuse.android"}' > /dev/null 2>&1
+  sleep 3
+  
+  # Try to click 权限管理
+  local R
+  R=$(_api_json POST /click -d '{"text":"权限管理","retry":3,"retryMs":2000}' 2>&1)
+  if ! echo "$R" | grep -q '"clicked":true'; then
+    echo "⚠️  Could not find '权限管理'. On tablets, navigate manually:"
+    echo "   Settings → 应用设置 → search 'Claw' → Claw Use → 权限管理"
+    return 1
+  fi
+  sleep 2
+  
+  local PERMS=("位置" "相机" "麦克风" "照片和视频" "音乐和音频" "短信" "电话" "联系人" "日历")
+  
+  for perm in "${PERMS[@]}"; do
+    printf "  %-12s " "$perm"
+    
+    R=$(_api_json POST /click -d "{\"text\":\"$perm\"}" 2>&1)
+    if ! echo "$R" | grep -q '"clicked":true'; then
+      echo "❌ not found"
+      continue
+    fi
+    sleep 3
+    
+    # Try allow options in priority order
+    local DONE=false
+    for opt in "始终允许" "仅在使用中允许" "允许"; do
+      R=$(_api_json POST /click -d "{\"text\":\"$opt\"}" 2>&1)
+      if echo "$R" | grep -q '"clicked":true'; then
+        echo "✅ $opt"
+        DONE=true
+        break
+      fi
+    done
+    
+    if [ "$DONE" = "false" ]; then
+      echo "⚠️  no allow option found"
+    fi
+    
+    # Must go back to permission list
+    _api_json POST /global -d '{"action":"back"}' > /dev/null 2>&1
+    sleep 2
+  done
+  
+  echo ""
+  echo "Done! Run 'cua info' to verify permissions."
+}
+
 cmd_help() {
   cat <<'EOF'
 cua — Claw Use Android CLI
@@ -513,6 +567,7 @@ case "$cmd" in
   lock) cmd_lock ;;
   unlock) cmd_unlock ;;
   config) cmd_config "$@" ;;
+  setup-perms) cmd_setup_perms ;;
   help|--help|-h) cmd_help ;;
   *) _err "Unknown command: $cmd. Run 'cua help' for usage." ;;
 esac
