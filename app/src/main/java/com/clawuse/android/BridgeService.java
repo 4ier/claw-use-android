@@ -372,8 +372,9 @@ public class BridgeService extends Service {
                 return cors(handleConfig(method, body));
             }
 
-            // === /notifications (proxied — NotificationBridge runs in main process) ===
-            if (path.startsWith("/notifications")) {
+            // === /notifications, /intent, /tts (proxied to main process) ===
+            if (path.startsWith("/notifications") || path.equals("/intent")
+                    || path.startsWith("/tts")) {
                 if (!tokenManager.validate(token)) return cors(unauthorized());
                 StatusTracker.get().recordRequest(path);
                 return cors(proxyToA11y(method, path, params, body));
@@ -522,7 +523,10 @@ public class BridgeService extends Service {
 
                 conn = (HttpURLConnection) new URL(urlStr.toString()).openConnection();
                 conn.setConnectTimeout(PROXY_CONNECT_TIMEOUT);
-                conn.setReadTimeout(PROXY_READ_TIMEOUT);
+                // TTS and unlock need more time
+                int readTimeout = (path.contains("/tts") || path.contains("/unlock"))
+                        ? 35000 : PROXY_READ_TIMEOUT;
+                conn.setReadTimeout(readTimeout);
                 conn.setRequestMethod(method);
                 conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
 
