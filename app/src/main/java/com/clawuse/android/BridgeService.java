@@ -421,7 +421,7 @@ public class BridgeService extends Service {
             try {
                 JSONObject j = StatusTracker.get().toJson();
                 j.put("status", StatusTracker.get().isA11yAlive() ? "ok" : "degraded");
-                j.put("version", "1.2.0");
+                j.put("version", "1.3.0");
 
                 // Device info
                 JSONObject device = new JSONObject();
