@@ -187,7 +187,7 @@ public class A11yInternalServer extends NanoHTTPD {
             String lenStr = session.getHeaders().get("content-length");
             if (lenStr == null) return "";
             int contentLength = Integer.parseInt(lenStr.trim());
-            if (contentLength <= 0 || contentLength > 1024 * 1024) return "";
+            if (contentLength <= 0 || contentLength > 10 * 1024 * 1024) return ""; // 10MB max
             byte[] buf = new byte[contentLength];
             int totalRead = 0;
             InputStream is = session.getInputStream();
