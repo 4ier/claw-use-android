@@ -8,8 +8,9 @@ set -euo pipefail
 # Config: env vars or ~/.config/claw-use/config
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claw-use"
 CONFIG_FILE="$CONFIG_DIR/config"
+DEVICES_FILE="$CONFIG_DIR/devices"
 
-# Load config
+# Load config (default device)
 if [ -f "$CONFIG_FILE" ]; then
   source "$CONFIG_FILE"
 fi
@@ -17,6 +18,28 @@ fi
 CU_HOST="${CU_HOST:-}"
 CU_TOKEN="${CU_TOKEN:-}"
 CU_TIMEOUT="${CU_TIMEOUT:-10}"
+CU_DEVICE="${CU_DEVICE:-}"
+
+# If a device alias is set, load from devices file
+_load_device() {
+  local name="$1"
+  if [ -f "$DEVICES_FILE" ]; then
+    local line=$(grep "^${name}|" "$DEVICES_FILE" 2>/dev/null | head -1)
+    if [ -n "$line" ]; then
+      CU_HOST=$(echo "$line" | cut -d'|' -f2)
+      CU_TOKEN=$(echo "$line" | cut -d'|' -f3)
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# Resolve device: env CU_DEVICE > --device flag > default config
+_resolve_device() {
+  if [ -n "$CU_DEVICE" ]; then
+    _load_device "$CU_DEVICE" || _err "Unknown device: $CU_DEVICE. Run 'cu devices' to list."
+  fi
+}
 
 # Colors
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -25,8 +48,9 @@ _err() { echo -e "${RED}error:${NC} $*" >&2; exit 1; }
 _ok() { echo -e "${GREEN}$*${NC}"; }
 
 _require_config() {
-  [ -n "$CU_HOST" ] || _err "CU_HOST not set. Run: cu setup <ip> <token>"
-  [ -n "$CU_TOKEN" ] || _err "CU_TOKEN not set. Run: cu setup <ip> <token>"
+  _resolve_device
+  [ -n "$CU_HOST" ] || _err "CU_HOST not set. Run: cu add <name> <ip> <token>"
+  [ -n "$CU_TOKEN" ] || _err "CU_TOKEN not set. Run: cu add <name> <ip> <token>"
 }
 
 _api() {
@@ -54,26 +78,104 @@ _jq_or_raw() {
 }
 
 cmd_setup() {
+  # Legacy: cu setup <ip> <token> → saves as default
   local host="${1:-}" token="${2:-}"
-  [ -n "$host" ] || _err "Usage: cu setup <ip-or-hostname> <token>"
-  [ -n "$token" ] || _err "Usage: cu setup <ip-or-hostname> <token>"
-  
+  [ -n "$host" ] && [ -n "$token" ] || _err "Usage: cu setup <ip> <token>  (or use: cu add <name> <ip> <token>)"
   mkdir -p "$CONFIG_DIR"
   cat > "$CONFIG_FILE" <<EOF
 CU_HOST="$host"
 CU_TOKEN="$token"
 EOF
   chmod 600 "$CONFIG_FILE"
+  CU_HOST="$host" CU_TOKEN="$token"
+  local result=$(_api GET /ping)
+  if echo "$result" | grep -q '"ok"'; then
+    local version=$(echo "$result" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+    _ok "Connected to Claw Use $version at $host (default device)"
+  else
+    echo -e "${YELLOW}warning:${NC} saved but ping failed: $result"
+  fi
+}
+
+cmd_add() {
+  local name="${1:-}" host="${2:-}" token="${3:-}"
+  [ -n "$name" ] && [ -n "$host" ] && [ -n "$token" ] || _err "Usage: cu add <name> <ip> <token>"
+  mkdir -p "$CONFIG_DIR"
+  touch "$DEVICES_FILE"
+  chmod 600 "$DEVICES_FILE"
+  # Remove existing entry with same name
+  sed -i "/^${name}|/d" "$DEVICES_FILE"
+  echo "${name}|${host}|${token}" >> "$DEVICES_FILE"
   
   # Test connection
   CU_HOST="$host" CU_TOKEN="$token"
   local result=$(_api GET /ping)
   if echo "$result" | grep -q '"ok"'; then
     local version=$(echo "$result" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-    _ok "Connected to Claw Use $version at $host"
-    _ok "Config saved to $CONFIG_FILE"
+    _ok "Added '$name' → $host (Claw Use $version)"
   else
-    echo -e "${YELLOW}warning:${NC} saved config but ping failed: $result"
+    _ok "Added '$name' → $host"
+    echo -e "${YELLOW}warning:${NC} ping failed: $result"
+  fi
+  
+  # Set as default if it's the first/only device
+  local count=$(wc -l < "$DEVICES_FILE")
+  if [ "$count" -eq 1 ] || [ ! -f "$CONFIG_FILE" ]; then
+    cmd_use "$name"
+  fi
+}
+
+cmd_devices() {
+  if [ ! -f "$DEVICES_FILE" ] || [ ! -s "$DEVICES_FILE" ]; then
+    echo "No devices configured. Run: cu add <name> <ip> <token>"
+    return
+  fi
+  
+  # Get current default
+  local current_host="${CU_HOST:-}"
+  
+  echo -e "${CYAN}DEVICES${NC}"
+  while IFS='|' read -r name host token; do
+    local marker="  "
+    if [ "$host" = "$current_host" ]; then marker="${GREEN}▸ ${NC}"; fi
+    
+    # Quick ping (1s timeout)
+    local status="${RED}offline${NC}"
+    local ping_result=$(curl -s --connect-timeout 1 -m 2 "http://${host}:7333/ping" 2>&1)
+    if echo "$ping_result" | grep -q '"ok"'; then
+      local ver=$(echo "$ping_result" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+      status="${GREEN}online${NC} v${ver}"
+    fi
+    
+    echo -e "${marker}${name}\t${host}\t${status}"
+  done < "$DEVICES_FILE"
+}
+
+cmd_use() {
+  local name="${1:-}"
+  [ -n "$name" ] || _err "Usage: cu use <device-name>"
+  
+  if ! _load_device "$name"; then
+    _err "Unknown device: $name. Run 'cu devices' to list."
+  fi
+  
+  mkdir -p "$CONFIG_DIR"
+  cat > "$CONFIG_FILE" <<EOF
+CU_HOST="$CU_HOST"
+CU_TOKEN="$CU_TOKEN"
+EOF
+  chmod 600 "$CONFIG_FILE"
+  _ok "Default device: $name ($CU_HOST)"
+}
+
+cmd_rm() {
+  local name="${1:-}"
+  [ -n "$name" ] || _err "Usage: cu rm <device-name>"
+  if [ -f "$DEVICES_FILE" ]; then
+    sed -i "/^${name}|/d" "$DEVICES_FILE"
+    _ok "Removed '$name'"
+  else
+    _err "No devices configured"
   fi
 }
 
@@ -255,8 +357,16 @@ cmd_help() {
   cat <<'EOF'
 cu — Claw Use CLI
 
-SETUP
-  cu setup <ip> <token>     Save connection config
+DEVICE MANAGEMENT
+  cu add <name> <ip> <token>  Add a device with alias
+  cu devices                  List all devices (with online status)
+  cu use <name>               Set default device
+  cu rm <name>                Remove a device
+  cu setup <ip> <token>       Quick setup (legacy, no alias)
+
+GLOBAL FLAGS
+  -d, --device <name>         Target a specific device for this command
+                              e.g. cu -d pixel screenshot
 
 PERCEPTION
   cu ping                   Health check
@@ -291,16 +401,37 @@ DEVICE
   cu config get|set|pin     Read/write device config
 
 ENV VARS
-  CU_HOST     Phone IP/hostname
-  CU_TOKEN    Auth token
-  CU_TIMEOUT  Request timeout in seconds (default: 10)
+  CU_HOST      Phone IP/hostname (overrides device config)
+  CU_TOKEN     Auth token (overrides device config)
+  CU_DEVICE    Device alias (same as -d flag)
+  CU_TIMEOUT   Request timeout in seconds (default: 10)
+
+EXAMPLES
+  cu add redmi 192.168.0.105 abc123     # add device
+  cu add pixel 100.80.1.5 def456        # add another
+  cu devices                             # list all
+  cu -d pixel screenshot                 # screenshot from pixel
+  cu use redmi                           # switch default
+  cu say "hello"                         # speak on default device
 EOF
 }
+
+# Parse global flags
+while [[ "${1:-}" == -* ]]; do
+  case "$1" in
+    -d|--device) CU_DEVICE="$2"; shift 2 ;;
+    *) break ;;
+  esac
+done
 
 # Main dispatch
 cmd="${1:-help}"; shift 2>/dev/null || true
 case "$cmd" in
   setup) cmd_setup "$@" ;;
+  add) cmd_add "$@" ;;
+  devices|ls) cmd_devices ;;
+  use) cmd_use "$@" ;;
+  rm|remove) cmd_rm "$@" ;;
   ping) cmd_ping ;;
   info) cmd_info ;;
   status) cmd_status ;;
