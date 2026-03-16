@@ -480,9 +480,51 @@ cmd_file() {
       [ -n "$path" ] && [ -n "$content" ] || _err "Usage: cua file write <path> <content>"
       _api_json POST /file -d "{\"path\":\"$path\",\"content\":\"$content\"}" | _jq_or_raw
       ;;
+    upload)
+      local src="${1:-}" dest="${2:-}"
+      [ -n "$src" ] && [ -n "$dest" ] || _err "Usage: cua file upload <local-file> <remote-path>"
+      [ -f "$src" ] || _err "File not found: $src"
+      _require_config
+      local url="http://${CU_HOST}:${CU_PORT:-7333}/file/upload?path=$(python3 -c "import urllib.parse;print(urllib.parse.quote('$dest'))")"
+      CU_TIMEOUT=120 curl -s -X POST "$url" \
+        -H "X-Bridge-Token: ${CU_TOKEN}" \
+        -H "Content-Type: application/octet-stream" \
+        --data-binary "@$src" | _jq_or_raw
+      ;;
     delete) [ -n "${1:-}" ] || _err "Usage: cua file delete <path>"; _api "DELETE" "/file?path=$1" | _jq_or_raw ;;
-    *) _err "Usage: cua file [list|read|write|delete] <path>" ;;
+    *) _err "Usage: cua file [list|read|write|upload|delete] <path>" ;;
   esac
+}
+
+cmd_update() {
+  _require_config
+  local apk="${1:-}"
+  [ -n "$apk" ] || _err "Usage: cua update <path-to-apk>"
+  [ -f "$apk" ] || _err "APK not found: $apk"
+
+  local size=$(stat -c%s "$apk" 2>/dev/null || stat -f%z "$apk" 2>/dev/null)
+  echo "Uploading APK ($size bytes)..."
+
+  # Upload via raw binary stream
+  local url="http://${CU_HOST}:${CU_PORT:-7333}/file/upload?path=$(python3 -c "import urllib.parse;print(urllib.parse.quote('/sdcard/Download/claw-update.apk'))")"
+  local result
+  result=$(CU_TIMEOUT=120 curl -s -X POST "$url" \
+    -H "X-Bridge-Token: ${CU_TOKEN}" \
+    -H "Content-Type: application/octet-stream" \
+    --data-binary "@$apk")
+  echo "$result" | _jq_or_raw
+
+  if echo "$result" | grep -q '"written":true'; then
+    echo "Triggering install..."
+    # Use MIUI file manager to open APK (most reliable on Xiaomi)
+    _api_json POST /intent -d '{"action":"android.intent.action.VIEW","uri":"content://com.android.fileexplorer.myprovider/sdcard/Download/claw-update.apk","type":"application/vnd.android.package-archive"}' 2>/dev/null | _jq_or_raw
+    # Fallback: open file manager at the download location
+    _api_json POST /launch -d '{"package":"com.android.fileexplorer"}' 2>/dev/null | _jq_or_raw
+    echo "APK uploaded to /sdcard/Download/claw-update.apk"
+    echo "Open file manager → Download → tap claw-update.apk to install"
+  else
+    echo "Upload failed"
+  fi
 }
 
 cmd_config() {
@@ -841,6 +883,7 @@ case "$cmd" in
   lock) cmd_lock ;;
   unlock) cmd_unlock ;;
   config) cmd_config "$@" ;;
+  update) cmd_update "$@" ;;
   setup-perms) cmd_setup_perms ;;
   onboard) cmd_onboard "$@" ;;
   clipboard|clip) cmd_clipboard "$@" ;;

@@ -348,6 +348,14 @@ public class BridgeService extends Service {
             String method = session.getMethod().name();
             Map<String, String> params = session.getParms();
 
+            // Raw binary upload — stream directly through proxy, no body buffering
+            if ("/file/upload".equals(path) && "POST".equals(method)) {
+                String token = session.getHeaders().get("x-bridge-token");
+                if (!tokenManager.validate(token)) return cors(unauthorized());
+                StatusTracker.get().recordRequest(path);
+                return cors(proxyStreamUpload(session, params));
+            }
+
             // Read body as raw UTF-8 (NanoHTTPD parseBody uses ISO-8859-1)
             String body = "";
             if ("POST".equals(method)) {
@@ -405,6 +413,13 @@ public class BridgeService extends Service {
                 if (!tokenManager.validate(token)) return cors(unauthorized());
                 StatusTracker.get().recordRequest(path);
                 return handleLocal(launchHandler, method, path, params, body);
+            }
+
+            // === /install — trigger APK install via FileProvider ===
+            if ("/install".equals(path)) {
+                if (!tokenManager.validate(token)) return cors(unauthorized());
+                StatusTracker.get().recordRequest(path);
+                return cors(handleInstall(body, params));
             }
 
             // === /status (Task 9) ===
@@ -478,6 +493,45 @@ public class BridgeService extends Service {
                 return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
             } catch (Exception e) {
                 return "unknown";
+            }
+        }
+
+        private Response handleInstall(String body, Map<String, String> params) {
+            try {
+                String filePath = params.get("path");
+                if (filePath == null || filePath.isEmpty()) {
+                    // Try JSON body
+                    if (body != null && !body.isEmpty()) {
+                        org.json.JSONObject req = new org.json.JSONObject(body);
+                        filePath = req.optString("path", "");
+                    }
+                }
+                if (filePath == null || filePath.isEmpty()) {
+                    filePath = "/sdcard/Download/claw-update.apk"; // default
+                }
+
+                java.io.File apkFile = new java.io.File(filePath);
+                if (!apkFile.exists()) {
+                    return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json",
+                            "{\"error\":\"APK not found: " + filePath + "\"}");
+                }
+
+                android.net.Uri contentUri = androidx.core.content.FileProvider.getUriForFile(
+                        BridgeService.this,
+                        getPackageName() + ".fileprovider",
+                        apkFile);
+
+                android.content.Intent intent = new android.content.Intent(android.content.Intent.ACTION_VIEW);
+                intent.setDataAndType(contentUri, "application/vnd.android.package-archive");
+                intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+
+                return newFixedLengthResponse(Response.Status.OK, "application/json",
+                        "{\"installing\":true,\"path\":\"" + filePath + "\"}");
+            } catch (Exception e) {
+                return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json",
+                        "{\"error\":\"install failed: " + escapeJson(e.getMessage()) + "\"}");
             }
         }
 
@@ -578,6 +632,67 @@ public class BridgeService extends Service {
          * Proxy request to internal a11y server on 127.0.0.1:7334.
          * Strict timeout: 1s connect + 5s read.
          */
+        /**
+         * Stream raw binary upload to internal server without buffering entire body.
+         * POST /file/upload?path=/sdcard/Download/app.apk with raw binary body.
+         */
+        private Response proxyStreamUpload(IHTTPSession session, Map<String, String> params) {
+            String filePath = params.get("path");
+            if (filePath == null || filePath.isEmpty()) {
+                return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json",
+                        "{\"error\":\"'path' query param required\"}");
+            }
+            try {
+                String lenStr = session.getHeaders().get("content-length");
+                if (lenStr == null) {
+                    return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json",
+                            "{\"error\":\"Content-Length required\"}");
+                }
+                long contentLength = Long.parseLong(lenStr.trim());
+
+                // Stream to internal server
+                String urlStr = "http://127.0.0.1:" + A11Y_PORT
+                        + "/a11y/file/upload?path=" + java.net.URLEncoder.encode(filePath, "UTF-8");
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
+                        new java.net.URL(urlStr).openConnection();
+                conn.setConnectTimeout(2000);
+                conn.setReadTimeout(120_000); // 2 min for large files
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setFixedLengthStreamingMode(contentLength);
+                conn.setRequestProperty("Content-Type", "application/octet-stream");
+                conn.setRequestProperty("Content-Length", String.valueOf(contentLength));
+
+                // Pipe client input → internal server output
+                java.io.InputStream clientIn = session.getInputStream();
+                java.io.OutputStream serverOut = conn.getOutputStream();
+                byte[] buf = new byte[8192];
+                long remaining = contentLength;
+                int n;
+                while (remaining > 0 && (n = clientIn.read(buf, 0,
+                        (int) Math.min(buf.length, remaining))) != -1) {
+                    serverOut.write(buf, 0, n);
+                    remaining -= n;
+                }
+                serverOut.flush();
+                serverOut.close();
+
+                // Read response
+                int code = conn.getResponseCode();
+                java.io.InputStream respStream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                while ((n = respStream.read(buf)) != -1) baos.write(buf, 0, n);
+                respStream.close();
+                conn.disconnect();
+
+                Response.IStatus status = code == 200 ? Response.Status.OK : Response.Status.INTERNAL_ERROR;
+                return newFixedLengthResponse(status, "application/json; charset=UTF-8", baos.toString("UTF-8"));
+            } catch (Exception e) {
+                return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json",
+                        "{\"error\":\"upload proxy failed: " + escapeJson(e.getMessage()) + "\"}");
+            }
+        }
+
         private Response proxyToA11y(String method, String path,
                                      Map<String, String> params, String body) {
             HttpURLConnection conn = null;
@@ -669,7 +784,7 @@ public class BridgeService extends Service {
                 String lenStr = session.getHeaders().get("content-length");
                 if (lenStr == null) return "";
                 int contentLength = Integer.parseInt(lenStr.trim());
-                if (contentLength <= 0 || contentLength > 10 * 1024 * 1024) return ""; // 10MB max
+                if (contentLength <= 0) return "";
                 byte[] buf = new byte[contentLength];
                 int totalRead = 0;
                 InputStream is = session.getInputStream();

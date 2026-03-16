@@ -89,6 +89,11 @@ public class A11yInternalServer extends NanoHTTPD {
         String method = session.getMethod().name();
         Map<String, String> params = session.getParms();
 
+        // Raw binary upload — stream directly to file, no body buffering
+        if ("/a11y/file/upload".equals(path) && "POST".equals(method)) {
+            return handleRawUpload(session, params);
+        }
+
         // Read POST body as raw UTF-8 (NanoHTTPD's parseBody uses ISO-8859-1)
         String body = "";
         if ("POST".equals(method)) {
@@ -175,6 +180,63 @@ public class A11yInternalServer extends NanoHTTPD {
         Log.i(TAG, "Internal a11y server stopped");
     }
 
+    /**
+     * Stream raw binary body directly to a file. No base64, no JSON parsing.
+     * Usage: POST /file/upload?path=/sdcard/Download/app.apk
+     * Body: raw binary file content
+     * Content-Type: application/octet-stream
+     */
+    private Response handleRawUpload(IHTTPSession session, Map<String, String> params) {
+        String filePath = params.get("path");
+        if (filePath == null || filePath.isEmpty()) {
+            return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json",
+                    "{\"error\":\"'path' query param required, e.g. ?path=/sdcard/Download/app.apk\"}");
+        }
+
+        try {
+            String lenStr = session.getHeaders().get("content-length");
+            if (lenStr == null) {
+                return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json",
+                        "{\"error\":\"Content-Length header required\"}");
+            }
+            long contentLength = Long.parseLong(lenStr.trim());
+
+            java.io.File file = new java.io.File(filePath);
+            java.io.File parent = file.getParentFile();
+            if (parent != null && !parent.exists()) parent.mkdirs();
+
+            InputStream is = session.getInputStream();
+            java.io.FileOutputStream fos = new java.io.FileOutputStream(file);
+            byte[] buf = new byte[8192];
+            long totalWritten = 0;
+            int n;
+            while (totalWritten < contentLength && (n = is.read(buf, 0,
+                    (int) Math.min(buf.length, contentLength - totalWritten))) != -1) {
+                fos.write(buf, 0, n);
+                totalWritten += n;
+            }
+            fos.close();
+
+            String json = new org.json.JSONObject()
+                    .put("written", true)
+                    .put("path", file.getAbsolutePath())
+                    .put("size", totalWritten)
+                    .toString();
+            return newFixedLengthResponse(Response.Status.OK, "application/json; charset=UTF-8", json);
+        } catch (java.io.FileNotFoundException e) {
+            String msg = e.getMessage();
+            if (msg != null && msg.contains("EPERM")) {
+                return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json",
+                        "{\"error\":\"permission denied\",\"hint\":\"use /sdcard/Download/ on Android 11+\"}");
+            }
+            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json",
+                    "{\"error\":\"" + escapeJson(msg) + "\"}");
+        } catch (Exception e) {
+            return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json",
+                    "{\"error\":\"upload failed: " + escapeJson(e.getMessage()) + "\"}");
+        }
+    }
+
     private String escapeJson(String s) {
         if (s == null) return "";
         return s.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -187,7 +249,7 @@ public class A11yInternalServer extends NanoHTTPD {
             String lenStr = session.getHeaders().get("content-length");
             if (lenStr == null) return "";
             int contentLength = Integer.parseInt(lenStr.trim());
-            if (contentLength <= 0 || contentLength > 10 * 1024 * 1024) return ""; // 10MB max
+            if (contentLength <= 0) return "";
             byte[] buf = new byte[contentLength];
             int totalRead = 0;
             InputStream is = session.getInputStream();
