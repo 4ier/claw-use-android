@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+# cu — Claw Use CLI
+# Control Android phones via Claw Use HTTP API
+# Usage: cu <command> [args...]
+
+set -euo pipefail
+
+# Config: env vars or ~/.config/claw-use/config
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/claw-use"
+CONFIG_FILE="$CONFIG_DIR/config"
+
+# Load config
+if [ -f "$CONFIG_FILE" ]; then
+  source "$CONFIG_FILE"
+fi
+
+CU_HOST="${CU_HOST:-}"
+CU_TOKEN="${CU_TOKEN:-}"
+CU_TIMEOUT="${CU_TIMEOUT:-10}"
+
+# Colors
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+
+_err() { echo -e "${RED}error:${NC} $*" >&2; exit 1; }
+_ok() { echo -e "${GREEN}$*${NC}"; }
+
+_require_config() {
+  [ -n "$CU_HOST" ] || _err "CU_HOST not set. Run: cu setup <ip> <token>"
+  [ -n "$CU_TOKEN" ] || _err "CU_TOKEN not set. Run: cu setup <ip> <token>"
+}
+
+_api() {
+  local method="$1" path="$2"; shift 2
+  local url="http://${CU_HOST}:7333${path}"
+  local auth_args=()
+  if [ "$path" != "/ping" ]; then
+    auth_args=(-H "X-Bridge-Token:${CU_TOKEN}")
+  fi
+  curl -s --connect-timeout 5 -m "$CU_TIMEOUT" -X "$method" "${auth_args[@]}" "$@" "$url" 2>&1
+}
+
+_api_json() {
+  _api "$@" -H "Content-Type: application/json"
+}
+
+_jq_or_raw() {
+  if [ -t 1 ] && command -v jq &>/dev/null; then
+    jq -C '.' 2>/dev/null || cat
+  elif command -v jq &>/dev/null; then
+    jq '.' 2>/dev/null || cat
+  else
+    cat
+  fi
+}
+
+cmd_setup() {
+  local host="${1:-}" token="${2:-}"
+  [ -n "$host" ] || _err "Usage: cu setup <ip-or-hostname> <token>"
+  [ -n "$token" ] || _err "Usage: cu setup <ip-or-hostname> <token>"
+  
+  mkdir -p "$CONFIG_DIR"
+  cat > "$CONFIG_FILE" <<EOF
+CU_HOST="$host"
+CU_TOKEN="$token"
+EOF
+  chmod 600 "$CONFIG_FILE"
+  
+  # Test connection
+  CU_HOST="$host" CU_TOKEN="$token"
+  local result=$(_api GET /ping)
+  if echo "$result" | grep -q '"ok"'; then
+    local version=$(echo "$result" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+    _ok "Connected to Claw Use $version at $host"
+    _ok "Config saved to $CONFIG_FILE"
+  else
+    echo -e "${YELLOW}warning:${NC} saved config but ping failed: $result"
+  fi
+}
+
+cmd_ping() {
+  _api GET /ping | _jq_or_raw
+}
+
+cmd_info() {
+  _require_config
+  _api GET /info | _jq_or_raw
+}
+
+cmd_status() {
+  _require_config
+  _api GET /status | _jq_or_raw
+}
+
+cmd_screen() {
+  _require_config
+  local params=()
+  local prev=""
+  for arg in "$@"; do
+    case "$arg" in
+      -c|--compact) params+=("compact=true") ;;
+      -t|--timeout) ;;
+      *)
+        if [[ "$prev" == "-t" || "$prev" == "--timeout" ]]; then
+          params+=("timeout=$arg")
+        fi
+        ;;
+    esac
+    prev="$arg"
+  done
+  local qs=""
+  if [ ${#params[@]} -gt 0 ]; then
+    qs="?$(IFS='&'; echo "${params[*]}")"
+  fi
+  _api GET "/screen${qs}" | _jq_or_raw
+}
+
+cmd_screenshot() {
+  _require_config
+  local quality="${1:-50}" maxWidth="${2:-720}" output="${3:-}"
+  local result=$(_api GET "/screenshot?quality=$quality&maxWidth=$maxWidth")
+  
+  if echo "$result" | grep -q '"error"'; then
+    echo "$result" | _jq_or_raw
+    return 1
+  fi
+  
+  local size=$(echo "$result" | grep -o '"sizeBytes":[0-9]*' | cut -d: -f2)
+  
+  if [ -n "$output" ]; then
+    echo "$result" | python3 -c "
+import sys,json,base64
+d=json.load(sys.stdin)
+with open('$output','wb') as f: f.write(base64.b64decode(d['screenshot']))
+" && _ok "Saved ${size}B → $output"
+  else
+    # Save to temp
+    local tmp="/tmp/cu-screenshot-$(date +%s).jpg"
+    echo "$result" | python3 -c "
+import sys,json,base64
+d=json.load(sys.stdin)
+with open('$tmp','wb') as f: f.write(base64.b64decode(d['screenshot']))
+"
+    _ok "${size}B → $tmp"
+    echo "$tmp"
+  fi
+}
+
+cmd_tap() {
+  _require_config
+  local x="${1:-}" y="${2:-}"
+  [ -n "$x" ] && [ -n "$y" ] || _err "Usage: cu tap <x> <y>"
+  _api_json POST /tap -d "{\"x\":$x,\"y\":$y}" | _jq_or_raw
+}
+
+cmd_click() {
+  _require_config
+  local text="$*"
+  [ -n "$text" ] || _err "Usage: cu click <text>"
+  _api_json POST /click -d "{\"text\":\"$text\"}" | _jq_or_raw
+}
+
+cmd_longpress() {
+  _require_config
+  local x="${1:-}" y="${2:-}"
+  [ -n "$x" ] && [ -n "$y" ] || _err "Usage: cu longpress <x> <y>"
+  _api_json POST /longpress -d "{\"x\":$x,\"y\":$y}" | _jq_or_raw
+}
+
+cmd_swipe() {
+  _require_config
+  local dir="${1:-up}"
+  _api_json POST /swipe -d "{\"direction\":\"$dir\"}" | _jq_or_raw
+}
+
+cmd_scroll() {
+  _require_config
+  local dir="${1:-down}"
+  _api_json POST /scroll -d "{\"direction\":\"$dir\"}" | _jq_or_raw
+}
+
+cmd_type() {
+  _require_config
+  local text="$*"
+  [ -n "$text" ] || _err "Usage: cu type <text>"
+  # JSON-escape the text
+  local escaped=$(python3 -c "import json; print(json.dumps('$text')[1:-1])" 2>/dev/null || echo "$text")
+  _api_json POST /type -d "{\"text\":\"$escaped\"}" | _jq_or_raw
+}
+
+cmd_back() { _require_config; _api_json POST /global -d '{"action":"back"}' | _jq_or_raw; }
+cmd_home() { _require_config; _api_json POST /global -d '{"action":"home"}' | _jq_or_raw; }
+cmd_recents() { _require_config; _api_json POST /global -d '{"action":"recents"}' | _jq_or_raw; }
+
+cmd_launch() {
+  _require_config
+  local pkg="${1:-}"
+  if [ -z "$pkg" ]; then
+    # List apps
+    _api GET /launch | _jq_or_raw
+  else
+    _api_json POST /launch -d "{\"package\":\"$pkg\"}" | _jq_or_raw
+  fi
+}
+
+cmd_tts() {
+  _require_config
+  local text="$*"
+  [ -n "$text" ] || _err "Usage: cu tts <text>"
+  CU_TIMEOUT=35 _api_json POST /tts -d "{\"text\":\"$text\"}" | _jq_or_raw
+}
+
+cmd_intent() {
+  _require_config
+  # Pass raw JSON body
+  local body="${1:-}"
+  [ -n "$body" ] || _err "Usage: cu intent '{\"action\":\"...\",\"uri\":\"...\"}'"
+  _api_json POST /intent -d "$body" | _jq_or_raw
+}
+
+cmd_call() {
+  _require_config
+  local number="${1:-}"
+  [ -n "$number" ] || _err "Usage: cu call <phone-number>"
+  _api_json POST /intent -d "{\"action\":\"android.intent.action.CALL\",\"uri\":\"tel:$number\"}" | _jq_or_raw
+}
+
+cmd_open() {
+  _require_config
+  local url="${1:-}"
+  [ -n "$url" ] || _err "Usage: cu open <url>"
+  _api_json POST /intent -d "{\"action\":\"android.intent.action.VIEW\",\"uri\":\"$url\"}" | _jq_or_raw
+}
+
+cmd_notifications() {
+  _require_config
+  _api GET /notifications | _jq_or_raw
+}
+
+cmd_wake() { _require_config; _api_json POST /screen/wake | _jq_or_raw; }
+cmd_lock() { _require_config; _api_json POST /screen/lock | _jq_or_raw; }
+cmd_unlock() { _require_config; _api_json POST /screen/unlock | _jq_or_raw; }
+
+cmd_config() {
+  _require_config
+  local subcmd="${1:-get}"; shift 2>/dev/null || true
+  case "$subcmd" in
+    get) _api GET /config | _jq_or_raw ;;
+    set) _api_json POST /config -d "$1" | _jq_or_raw ;;
+    pin) _api_json POST /config -d "{\"pin\":\"$1\"}" | _jq_or_raw ;;
+    *) _err "Usage: cu config get|set|pin" ;;
+  esac
+}
+
+cmd_help() {
+  cat <<'EOF'
+cu — Claw Use CLI
+
+SETUP
+  cu setup <ip> <token>     Save connection config
+
+PERCEPTION
+  cu ping                   Health check
+  cu info                   Device info
+  cu status                 Full health dashboard
+  cu screen [-c] [-t ms]    Read UI tree (-c = compact)
+  cu screenshot [q] [w] [f] Screenshot (quality, maxWidth, output file)
+  cu notifications          List notifications
+
+ACTION
+  cu tap <x> <y>            Tap coordinates
+  cu click <text>           Tap element by text
+  cu longpress <x> <y>      Long press
+  cu swipe <up|down|l|r>    Swipe
+  cu scroll <up|down|l|r>   Scroll
+  cu type <text>            Type text
+  cu back                   Press back
+  cu home                   Press home
+  cu recents                Recent apps
+  cu launch [package]       List apps / launch app
+  cu open <url>             Open URL in browser
+  cu call <number>          Make a phone call
+  cu intent <json>          Fire raw Android Intent
+
+AUDIO
+  cu tts <text>             Speak through phone speaker
+
+DEVICE
+  cu wake                   Wake screen
+  cu lock                   Lock device
+  cu unlock                 Unlock (requires PIN configured)
+  cu config get|set|pin     Read/write device config
+
+ENV VARS
+  CU_HOST     Phone IP/hostname
+  CU_TOKEN    Auth token
+  CU_TIMEOUT  Request timeout in seconds (default: 10)
+EOF
+}
+
+# Main dispatch
+cmd="${1:-help}"; shift 2>/dev/null || true
+case "$cmd" in
+  setup) cmd_setup "$@" ;;
+  ping) cmd_ping ;;
+  info) cmd_info ;;
+  status) cmd_status ;;
+  screen) cmd_screen "$@" ;;
+  screenshot|ss) cmd_screenshot "$@" ;;
+  tap) cmd_tap "$@" ;;
+  click) cmd_click "$@" ;;
+  longpress|lp) cmd_longpress "$@" ;;
+  swipe) cmd_swipe "$@" ;;
+  scroll) cmd_scroll "$@" ;;
+  type) cmd_type "$@" ;;
+  back) cmd_back ;;
+  home) cmd_home ;;
+  recents) cmd_recents ;;
+  launch) cmd_launch "$@" ;;
+  tts|say) cmd_tts "$@" ;;
+  intent) cmd_intent "$@" ;;
+  call) cmd_call "$@" ;;
+  open) cmd_open "$@" ;;
+  notifications|notif) cmd_notifications ;;
+  wake) cmd_wake ;;
+  lock) cmd_lock ;;
+  unlock) cmd_unlock ;;
+  config) cmd_config "$@" ;;
+  help|--help|-h) cmd_help ;;
+  *) _err "Unknown command: $cmd. Run 'cu help' for usage." ;;
+esac
