@@ -392,6 +392,99 @@ cmd_wake() { _require_config; _api_json POST /screen/wake | _jq_or_raw; }
 cmd_lock() { _require_config; _api_json POST /screen/lock | _jq_or_raw; }
 cmd_unlock() { _require_config; _api_json POST /screen/unlock | _jq_or_raw; }
 
+# ── New I/O commands (v1.7.0) ──
+
+cmd_clipboard() {
+  _require_config
+  local text="$*"
+  if [ -z "$text" ]; then
+    _api GET /clipboard | _jq_or_raw
+  else
+    _api_json POST /clipboard -d "{\"text\":\"$text\"}" | _jq_or_raw
+  fi
+}
+
+cmd_volume() {
+  _require_config
+  local arg1="${1:-}"
+  if [ -z "$arg1" ]; then
+    _api GET /volume | _jq_or_raw
+    return
+  fi
+  local stream="$arg1" arg2="${2:-}"
+  if [ -z "$arg2" ]; then
+    _err "Usage: cua volume [stream] [level|up|down|mute|unmute]"
+  fi
+  case "$arg2" in
+    up|down|mute|unmute) _api_json POST /volume -d "{\"stream\":\"$stream\",\"action\":\"$arg2\"}" | _jq_or_raw ;;
+    *) _api_json POST /volume -d "{\"stream\":\"$stream\",\"level\":$arg2}" | _jq_or_raw ;;
+  esac
+}
+
+cmd_battery() { _require_config; _api GET /battery | _jq_or_raw; }
+cmd_wifi() { _require_config; _api GET /wifi | _jq_or_raw; }
+cmd_location() { _require_config; CU_TIMEOUT=15 _api GET /location | _jq_or_raw; }
+
+cmd_vibrate() {
+  _require_config
+  local ms="${1:-200}"
+  _api_json POST /vibrate -d "{\"ms\":$ms}" | _jq_or_raw
+}
+
+cmd_camera() {
+  _require_config
+  local facing="${1:-back}" quality="${2:-80}" out="${3:-}"
+  local resp
+  resp=$(CU_TIMEOUT=35 _api_json POST /camera -d "{\"facing\":\"$facing\",\"quality\":$quality}")
+  if [ -n "$out" ]; then
+    echo "$resp" | jq -r '.image' | base64 -d > "$out" 2>/dev/null && echo "Saved to $out" || echo "$resp" | _jq_or_raw
+  else
+    echo "$resp" | _jq_or_raw
+  fi
+}
+
+cmd_contacts() {
+  _require_config
+  local search="${1:-}"
+  if [ -n "$search" ]; then
+    _api "GET" "/contacts?search=$search" | _jq_or_raw
+  else
+    _api GET /contacts | _jq_or_raw
+  fi
+}
+
+cmd_sms() {
+  _require_config
+  local sub="${1:-list}"
+  shift 2>/dev/null || true
+  case "$sub" in
+    list) _api GET "/sms?limit=${1:-20}" | _jq_or_raw ;;
+    send)
+      local to="${1:-}" msg="${2:-}"
+      [ -n "$to" ] && [ -n "$msg" ] || _err "Usage: cua sms send <number> <message>"
+      _api_json POST /sms -d "{\"to\":\"$to\",\"message\":\"$msg\"}" | _jq_or_raw
+      ;;
+    *) _err "Usage: cua sms [list|send]" ;;
+  esac
+}
+
+cmd_file() {
+  _require_config
+  local sub="${1:-}"
+  shift 2>/dev/null || true
+  case "$sub" in
+    list) _api "GET" "/file/list?path=${1:-/sdcard}" | _jq_or_raw ;;
+    read) [ -n "${1:-}" ] || _err "Usage: cua file read <path>"; _api "GET" "/file?path=$1" | _jq_or_raw ;;
+    write)
+      local path="${1:-}" content="${2:-}"
+      [ -n "$path" ] && [ -n "$content" ] || _err "Usage: cua file write <path> <content>"
+      _api_json POST /file -d "{\"path\":\"$path\",\"content\":\"$content\"}" | _jq_or_raw
+      ;;
+    delete) [ -n "${1:-}" ] || _err "Usage: cua file delete <path>"; _api "DELETE" "/file?path=$1" | _jq_or_raw ;;
+    *) _err "Usage: cua file [list|read|write|delete] <path>" ;;
+  esac
+}
+
 cmd_config() {
   _require_config
   local subcmd="${1:-get}"; shift 2>/dev/null || true
@@ -750,6 +843,16 @@ case "$cmd" in
   config) cmd_config "$@" ;;
   setup-perms) cmd_setup_perms ;;
   onboard) cmd_onboard "$@" ;;
+  clipboard|clip) cmd_clipboard "$@" ;;
+  volume|vol) cmd_volume "$@" ;;
+  battery|bat) cmd_battery ;;
+  wifi) cmd_wifi ;;
+  location|loc) cmd_location ;;
+  vibrate|vib) cmd_vibrate "$@" ;;
+  camera|cam) cmd_camera "$@" ;;
+  contacts) cmd_contacts "$@" ;;
+  sms) cmd_sms "$@" ;;
+  file) cmd_file "$@" ;;
   help|--help|-h) cmd_help ;;
   *) _err "Unknown command: $cmd. Run 'cua help' for usage." ;;
 esac

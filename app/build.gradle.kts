@@ -10,8 +10,8 @@ android {
         applicationId = "com.clawuse.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 14
-        versionName = "1.6.4"
+        versionCode = 15
+        versionName = "1.7.0"
     }
 
     compileOptions {

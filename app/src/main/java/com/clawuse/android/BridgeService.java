@@ -392,10 +392,21 @@ public class BridgeService extends Service {
                 return cors(handleConfig(method, body));
             }
 
-            // === /notifications, /intent, /tts, /audio/record, /batch (proxied to main process) ===
+            // === Proxied to main process (no auto-unlock needed) ===
             if (path.startsWith("/notifications") || path.equals("/intent")
                     || path.startsWith("/tts") || path.equals("/audio/record")
-                    || path.equals("/batch")) {
+                    || path.equals("/batch")
+                    || path.equals("/clipboard") || path.equals("/volume")
+                    || path.equals("/battery") || path.equals("/wifi")
+                    || path.equals("/vibrate") || path.equals("/sms")
+                    || path.equals("/contacts") || path.startsWith("/file")) {
+                if (!tokenManager.validate(token)) return cors(unauthorized());
+                StatusTracker.get().recordRequest(path);
+                return cors(proxyToA11y(method, path, params, body));
+            }
+
+            // === Camera and Location (proxied, longer timeout) ===
+            if (path.equals("/camera") || path.equals("/location")) {
                 if (!tokenManager.validate(token)) return cors(unauthorized());
                 StatusTracker.get().recordRequest(path);
                 return cors(proxyToA11y(method, path, params, body));
@@ -437,7 +448,7 @@ public class BridgeService extends Service {
             try {
                 JSONObject j = StatusTracker.get().toJson();
                 j.put("status", StatusTracker.get().isA11yAlive() ? "ok" : "degraded");
-                j.put("version", "1.6.3");
+                j.put("version", "1.7.0");
 
                 // Device info
                 JSONObject device = new JSONObject();
@@ -547,11 +558,13 @@ public class BridgeService extends Service {
 
                 conn = (HttpURLConnection) new URL(urlStr.toString()).openConnection();
                 conn.setConnectTimeout(PROXY_CONNECT_TIMEOUT);
-                // TTS, audio record, unlock, and flow need more time; batch gets 60s
+                // Longer timeouts for slow endpoints
                 int readTimeout = (path.contains("/tts") || path.contains("/unlock")
-                        || path.equals("/audio/record"))
+                        || path.equals("/audio/record") || path.equals("/camera"))
                         ? 35000 : path.equals("/flow") ? 310_000
-                        : path.equals("/batch") ? 60000 : PROXY_READ_TIMEOUT;
+                        : path.equals("/batch") ? 60000
+                        : path.equals("/location") ? 15000
+                        : PROXY_READ_TIMEOUT;
                 conn.setReadTimeout(readTimeout);
                 conn.setRequestMethod(method);
                 conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");

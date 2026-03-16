@@ -31,9 +31,20 @@ public class A11yInternalServer extends NanoHTTPD {
     private final AudioRecordHandler audioRecordHandler;
     private final FlowHandler flowHandler;
     private final BatchHandler batchHandler;
+    private final ClipboardHandler clipboardHandler;
+    private final VolumeHandler volumeHandler;
+    private final BatteryHandler batteryHandler;
+    private final WifiHandler wifiHandler;
+    private final VibrateHandler vibrateHandler;
+    private final LocationHandler locationHandler;
+    private final ContactsHandler contactsHandler;
+    private final SmsHandler smsHandler;
+    private final FileHandler fileHandler;
+    private final CameraHandler cameraHandler;
 
     public A11yInternalServer(AccessibilityBridge bridge) {
         super("127.0.0.1", 7334);
+        android.content.Context ctx = bridge;
         // All handlers run in the main process, direct access to AccessibilityBridge
         this.screenHandler = new ScreenHandler();
         this.screenHandler.setBridge(bridge);
@@ -46,6 +57,16 @@ public class A11yInternalServer extends NanoHTTPD {
         this.audioRecordHandler = new AudioRecordHandler();
         this.flowHandler = new FlowHandler(bridge);
         this.batchHandler = new BatchHandler(screenHandler, gestureHandler, globalHandler);
+        this.clipboardHandler = new ClipboardHandler(ctx);
+        this.volumeHandler = new VolumeHandler(ctx);
+        this.batteryHandler = new BatteryHandler(ctx);
+        this.wifiHandler = new WifiHandler(ctx);
+        this.vibrateHandler = new VibrateHandler(ctx);
+        this.locationHandler = new LocationHandler(ctx);
+        this.contactsHandler = new ContactsHandler(ctx);
+        this.smsHandler = new SmsHandler(ctx);
+        this.fileHandler = new FileHandler(ctx);
+        this.cameraHandler = new CameraHandler(ctx);
     }
 
     @Override
@@ -107,6 +128,17 @@ public class A11yInternalServer extends NanoHTTPD {
         if ("/a11y/flow".equals(path)) return flowHandler;
 
         if ("/a11y/batch".equals(path)) return batchHandler;
+
+        if ("/a11y/clipboard".equals(path)) return clipboardHandler;
+        if ("/a11y/volume".equals(path)) return volumeHandler;
+        if ("/a11y/battery".equals(path)) return batteryHandler;
+        if ("/a11y/wifi".equals(path)) return wifiHandler;
+        if ("/a11y/vibrate".equals(path)) return vibrateHandler;
+        if ("/a11y/location".equals(path)) return locationHandler;
+        if ("/a11y/contacts".equals(path)) return contactsHandler;
+        if ("/a11y/sms".equals(path)) return smsHandler;
+        if (path.startsWith("/a11y/file")) return fileHandler;
+        if ("/a11y/camera".equals(path)) return cameraHandler;
 
         return null;
     }
