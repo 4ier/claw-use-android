@@ -41,6 +41,7 @@ public class A11yInternalServer extends NanoHTTPD {
     private final SmsHandler smsHandler;
     private final FileHandler fileHandler;
     private final CameraHandler cameraHandler;
+    private final RouteHandler overlayHandler;
 
     public A11yInternalServer(AccessibilityBridge bridge) {
         super("127.0.0.1", 7334);
@@ -67,6 +68,19 @@ public class A11yInternalServer extends NanoHTTPD {
         this.smsHandler = new SmsHandler(ctx);
         this.fileHandler = new FileHandler(ctx);
         this.cameraHandler = new CameraHandler(ctx);
+        this.overlayHandler = (method, path, params, body) -> {
+            OverlayManager overlay = OverlayManager.getInstanceOrNull();
+            if (overlay == null) return "{\"error\":\"overlay not initialized\"}";
+            String action = params.getOrDefault("action", "status");
+            if ("activity".equals(action)) {
+                if (overlay.isTakenOver()) {
+                    return "{\"paused\":true,\"reason\":\"user takeover\",\"hint\":\"user has taken control, retry later\"}";
+                }
+                overlay.onApiActivity();
+                return "{\"paused\":false}";
+            }
+            return "{\"takenOver\":" + overlay.isTakenOver() + "}";
+        };
     }
 
     @Override
@@ -128,6 +142,9 @@ public class A11yInternalServer extends NanoHTTPD {
         if ("/a11y/flow".equals(path)) return flowHandler;
 
         if ("/a11y/batch".equals(path)) return batchHandler;
+
+        // Overlay management (activity notification + takeover check)
+        if ("/a11y/overlay".equals(path)) return overlayHandler;
 
         if ("/a11y/clipboard".equals(path)) return clipboardHandler;
         if ("/a11y/volume".equals(path)) return volumeHandler;

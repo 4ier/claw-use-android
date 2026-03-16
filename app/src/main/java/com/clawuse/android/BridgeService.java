@@ -367,6 +367,35 @@ public class BridgeService extends Service {
 
             // === AUTHENTICATED ===
             String token = session.getHeaders().get("x-bridge-token");
+
+            // Takeover check + overlay trigger via internal server (main process)
+            if (!"/status".equals(path) && !"/config".equals(path)
+                    && !"/info".equals(path) && !"/permissions".equals(path)
+                    && !"/ping".equals(path) && !"/launch".equals(path)) {
+                // Quick check: is user takeover active? (via internal HTTP endpoint)
+                try {
+                    java.net.URL url = new java.net.URL("http://127.0.0.1:" + A11Y_PORT + "/a11y/overlay?action=activity");
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                    conn.setConnectTimeout(500);
+                    conn.setReadTimeout(500);
+                    conn.setRequestMethod("GET");
+                    String resp = "";
+                    java.io.InputStream is = conn.getInputStream();
+                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                    byte[] buf = new byte[256];
+                    int n;
+                    while ((n = is.read(buf)) != -1) baos.write(buf, 0, n);
+                    resp = baos.toString("UTF-8");
+                    conn.disconnect();
+                    if (resp.contains("\"paused\":true")) {
+                        return cors(newFixedLengthResponse(Response.Status.OK,
+                                "application/json; charset=UTF-8", resp));
+                    }
+                } catch (Exception ignored) {
+                    // If internal server unreachable, proceed normally
+                }
+            }
+
             if ("/info".equals(path) || "/permissions".equals(path)) {
                 if (!tokenManager.validate(token)) return cors(unauthorized());
                 StatusTracker.get().recordRequest(path);

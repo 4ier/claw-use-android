@@ -35,6 +35,9 @@ public class AccessibilityBridge extends AccessibilityService {
         instance = this;
         Log.i(TAG, "AccessibilityBridge connected");
 
+        // Initialize overlay manager (needs a11y service context for TYPE_ACCESSIBILITY_OVERLAY)
+        OverlayManager.getInstance(this);
+
         // Start internal a11y server for cross-process communication
         internalServer = new A11yInternalServer(this);
         internalServer.startServer();

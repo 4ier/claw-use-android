@@ -3,7 +3,9 @@ package com.clawuse.android.handlers;
 import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
+import android.provider.Telephony;
 import android.telephony.SmsManager;
+import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
