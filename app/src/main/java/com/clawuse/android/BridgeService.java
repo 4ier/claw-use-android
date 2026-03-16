@@ -214,14 +214,18 @@ public class BridgeService extends Service {
         String uptime = formatUptime(st.getUptimeSeconds());
         String text = url + " | Reqs: " + st.getRequestCount() + " | Up: " + uptime;
 
-        // Copy URL action
-        Intent copyUrlIntent = new Intent(this, NotificationActionReceiver.class);
-        copyUrlIntent.setAction(NotificationActionReceiver.ACTION_COPY_URL);
-        copyUrlIntent.putExtra(NotificationActionReceiver.EXTRA_TEXT, url);
-        PendingIntent copyUrlPi = PendingIntent.getBroadcast(this, 1, copyUrlIntent,
+        // Build one-line setup command: cua add <hostname> <ip> <token>
+        String hostname = android.os.Build.MODEL.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
+        String setupCmd = "cua add " + hostname + " " + getWifiIpAddress() + " " + tokenManager.getToken();
+
+        // Copy Setup Command action
+        Intent copySetupIntent = new Intent(this, NotificationActionReceiver.class);
+        copySetupIntent.setAction(NotificationActionReceiver.ACTION_COPY_URL);
+        copySetupIntent.putExtra(NotificationActionReceiver.EXTRA_TEXT, setupCmd);
+        PendingIntent copySetupPi = PendingIntent.getBroadcast(this, 1, copySetupIntent,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
-        // Copy Token action
+        // Copy Token action (keep for power users)
         Intent copyTokenIntent = new Intent(this, NotificationActionReceiver.class);
         copyTokenIntent.setAction(NotificationActionReceiver.ACTION_COPY_TOKEN);
         copyTokenIntent.putExtra(NotificationActionReceiver.EXTRA_TEXT, tokenManager.getToken());
@@ -235,7 +239,7 @@ public class BridgeService extends Service {
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .addAction(new Notification.Action.Builder(
-                        null, "Copy URL", copyUrlPi).build())
+                        null, "📋 Copy Setup", copySetupPi).build())
                 .addAction(new Notification.Action.Builder(
                         null, "Copy Token", copyTokenPi).build())
                 .build();

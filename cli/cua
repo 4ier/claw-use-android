@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # cua — Claw Use CLI
 # Control Android phones via Claw Use HTTP API
-# Usage: cu <command> [args...]
+# Usage: cua <command> [args...]
 
 set -euo pipefail
 
@@ -177,6 +177,45 @@ cmd_rm() {
   else
     _err "No devices configured"
   fi
+}
+
+cmd_discover() {
+  local target_subnet="${1:-}"
+  echo -e "${CYAN}Scanning for Claw Use devices...${NC}"
+  
+  # Collect subnets to scan
+  local subnets=()
+  if [ -n "$target_subnet" ]; then
+    subnets+=("$target_subnet")
+  else
+    # Auto-detect all local subnets
+    while IFS= read -r ip; do
+      local subnet=$(echo "$ip" | sed 's/\.[0-9]*$//')
+      # Dedup
+      local dup=0
+      for s in "${subnets[@]:-}"; do [ "$s" = "$subnet" ] && dup=1; done
+      [ "$dup" -eq 0 ] && subnets+=("$subnet")
+    done < <(ip -4 addr show | grep -oP 'inet \K[0-9.]+' | grep -v '^127\.')
+  fi
+  
+  for subnet in "${subnets[@]}"; do
+    echo "Scanning ${subnet}.0/24 ..."
+    for i in $(seq 1 254); do
+      (
+        local ip="${subnet}.${i}"
+        local result=$(curl -s --connect-timeout 1 -m 2 "http://${ip}:7333/ping" 2>/dev/null)
+        if echo "$result" | grep -q '"claw-use-android"' 2>/dev/null; then
+          local ver=$(echo "$result" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+          echo -e "  ${GREEN}found${NC}  ${ip}:7333  v${ver}"
+        fi
+      ) &
+    done
+    wait
+  done
+  
+  echo ""
+  echo "To add: cua add <name> <ip> <token>"
+  echo "Tip: cua discover 192.168.0  (scan specific subnet)"
 }
 
 cmd_ping() {
@@ -360,6 +399,7 @@ cua — Claw Use Android CLI
 DEVICE MANAGEMENT
   cua add <name> <ip> <token>  Add a device with alias
   cua devices                  List all devices (with online status)
+  cua discover                 Scan local network for devices
   cua use <name>               Set default device
   cua rm <name>                Remove a device
   cua setup <ip> <token>       Quick setup (legacy, no alias)
@@ -432,6 +472,7 @@ case "$cmd" in
   devices|ls) cmd_devices ;;
   use) cmd_use "$@" ;;
   rm|remove) cmd_rm "$@" ;;
+  discover|scan) cmd_discover ;;
   ping) cmd_ping ;;
   info) cmd_info ;;
   status) cmd_status ;;
