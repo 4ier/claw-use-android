@@ -1,6 +1,12 @@
 package com.clawuse.android.handlers;
 
-import android.graphics.Rect;
+import android.accessibilityservice.AccessibilityService;
+import android.graphics.Bitmap;
+import android.hardware.HardwareBuffer;
+import android.media.Image;
+import android.media.ImageReader;
+import android.os.Build;
+import android.util.Base64;
 import android.view.accessibility.AccessibilityNodeInfo;
 
 import com.clawuse.android.AccessibilityBridge;
@@ -9,21 +15,21 @@ import com.clawuse.android.SafeA11y;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import android.graphics.Rect;
 
 /**
- * Handles /screen and /screenshot endpoints.
- *
- * Tree traversal runs through SafeA11y (single-thread executor with timeout).
- * If the worker gets stuck on a pathological UI tree, subsequent requests
- * return a timeout error immediately — the HTTP server stays responsive.
+ * Handles /screen (UI tree) and /screenshot (actual screenshot) endpoints.
  */
 public class ScreenHandler implements RouteHandler {
     private static final int DEFAULT_TIMEOUT_MS = 3000;
+    private static final int SCREENSHOT_TIMEOUT_MS = 5000;
     private AccessibilityBridge bridge;
 
-    /** Optional: set bridge instance directly (used in main process). */
     public void setBridge(AccessibilityBridge bridge) {
         this.bridge = bridge;
     }
@@ -35,7 +41,17 @@ public class ScreenHandler implements RouteHandler {
     @Override
     public String handle(String method, String path, Map<String, String> params, String body) throws Exception {
         if (path.startsWith("/screenshot")) {
-            return handleScreenshot();
+            int quality = 50;
+            if (params.containsKey("quality")) {
+                try { quality = Math.max(10, Math.min(100, Integer.parseInt(params.get("quality")))); }
+                catch (NumberFormatException ignored) {}
+            }
+            int maxWidth = 720;
+            if (params.containsKey("maxWidth")) {
+                try { maxWidth = Math.max(100, Math.min(2000, Integer.parseInt(params.get("maxWidth")))); }
+                catch (NumberFormatException ignored) {}
+            }
+            return handleScreenshot(quality, maxWidth);
         }
         boolean compact = params.containsKey("compact");
         int timeoutMs = DEFAULT_TIMEOUT_MS;
@@ -49,13 +65,94 @@ public class ScreenHandler implements RouteHandler {
         return getScreenJson(compact, timeoutMs);
     }
 
+    private String handleScreenshot(int quality, int maxWidth) throws Exception {
+        AccessibilityBridge b = getBridge();
+        if (b == null) {
+            return "{\"error\":\"accessibility service not running\"}";
+        }
+
+        if (Build.VERSION.SDK_INT < 30) {
+            return "{\"error\":\"screenshot requires API 30+\",\"apiLevel\":" + Build.VERSION.SDK_INT + "}";
+        }
+
+        final CountDownLatch latch = new CountDownLatch(1);
+        final byte[][] result = {null};
+        final String[] error = {null};
+        final int q = quality;
+        final int mw = maxWidth;
+
+        b.takeScreenshot(0, b.getMainExecutor(), new AccessibilityService.TakeScreenshotCallback() {
+            @Override
+            public void onSuccess(AccessibilityService.ScreenshotResult screenshot) {
+                try {
+                    HardwareBuffer hwBuffer = screenshot.getHardwareBuffer();
+                    Bitmap bitmap = Bitmap.wrapHardwareBuffer(hwBuffer, screenshot.getColorSpace());
+                    hwBuffer.close();
+
+                    if (bitmap == null) {
+                        error[0] = "failed to create bitmap from hardware buffer";
+                        latch.countDown();
+                        return;
+                    }
+
+                    // Scale down if needed
+                    if (bitmap.getWidth() > mw) {
+                        float scale = (float) mw / bitmap.getWidth();
+                        int newH = (int) (bitmap.getHeight() * scale);
+                        Bitmap scaled = Bitmap.createScaledBitmap(bitmap, mw, newH, true);
+                        bitmap.recycle();
+                        bitmap = scaled;
+                    }
+
+                    // Convert to software bitmap for JPEG compression
+                    Bitmap swBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false);
+                    bitmap.recycle();
+
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    swBitmap.compress(Bitmap.CompressFormat.JPEG, q, baos);
+                    swBitmap.recycle();
+                    result[0] = baos.toByteArray();
+                } catch (Exception e) {
+                    error[0] = e.getMessage();
+                }
+                latch.countDown();
+            }
+
+            @Override
+            public void onFailure(int errorCode) {
+                error[0] = "screenshot failed with code " + errorCode;
+                latch.countDown();
+            }
+        });
+
+        boolean ok = latch.await(SCREENSHOT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+
+        if (!ok) {
+            return "{\"error\":\"screenshot timed out\"}";
+        }
+        if (error[0] != null) {
+            return new JSONObject().put("error", error[0]).toString();
+        }
+        if (result[0] == null) {
+            return "{\"error\":\"screenshot returned null\"}";
+        }
+
+        String base64 = Base64.encodeToString(result[0], Base64.NO_WRAP);
+        return new JSONObject()
+                .put("screenshot", base64)
+                .put("format", "jpeg")
+                .put("quality", quality)
+                .put("sizeBytes", result[0].length)
+                .put("timestamp", System.currentTimeMillis())
+                .toString();
+    }
+
     private String getScreenJson(boolean compact, int timeoutMs) throws Exception {
         AccessibilityBridge b = getBridge();
         if (b == null) {
             return "{\"error\":\"accessibility service not running\",\"nodes\":[]}";
         }
 
-        // Check if SafeA11y worker is already stuck
         if (SafeA11y.isWorkerBusy()) {
             return new JSONObject()
                     .put("error", "accessibility worker busy (previous request stuck)")
@@ -64,7 +161,6 @@ public class ScreenHandler implements RouteHandler {
                     .toString();
         }
 
-        // Run entire tree read through SafeA11y's single-thread executor
         String result = SafeA11y.run(() -> {
             AccessibilityNodeInfo root = b.getRootNode();
             if (root == null) {
@@ -137,12 +233,6 @@ public class ScreenHandler implements RouteHandler {
                     child.recycle();
                 }
             }
-        } catch (Exception ignored) {
-            // Skip problematic nodes
-        }
-    }
-
-    private String handleScreenshot() {
-        return "{\"error\":\"screenshot not yet implemented\",\"hint\":\"coming in phase 2\"}";
+        } catch (Exception ignored) {}
     }
 }

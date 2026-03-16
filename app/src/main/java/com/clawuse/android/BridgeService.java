@@ -372,6 +372,13 @@ public class BridgeService extends Service {
                 return cors(handleConfig(method, body));
             }
 
+            // === /notifications (proxied — NotificationBridge runs in main process) ===
+            if (path.startsWith("/notifications")) {
+                if (!tokenManager.validate(token)) return cors(unauthorized());
+                StatusTracker.get().recordRequest(path);
+                return cors(proxyToA11y(method, path, params, body));
+            }
+
             // === A11Y ENDPOINTS ===
             if (!tokenManager.validate(token)) return cors(unauthorized());
             StatusTracker.get().recordRequest(path);

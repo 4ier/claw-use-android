@@ -25,6 +25,7 @@ public class A11yInternalServer extends NanoHTTPD {
     private final GestureHandler gestureHandler;
     private final GlobalHandler globalHandler;
     private final ScreenControlHandler screenControlHandler;
+    private final NotificationHandler notificationHandler;
 
     public A11yInternalServer(AccessibilityBridge bridge) {
         super("127.0.0.1", 7334);
@@ -34,6 +35,7 @@ public class A11yInternalServer extends NanoHTTPD {
         this.gestureHandler = new GestureHandler(bridge);
         this.globalHandler = new GlobalHandler();
         this.screenControlHandler = new ScreenControlHandler(bridge);
+        this.notificationHandler = new NotificationHandler();
     }
 
     @Override
@@ -83,6 +85,8 @@ public class A11yInternalServer extends NanoHTTPD {
         }
 
         if ("/a11y/global".equals(path)) return globalHandler;
+
+        if (path.startsWith("/a11y/notifications")) return notificationHandler;
 
         return null;
     }
