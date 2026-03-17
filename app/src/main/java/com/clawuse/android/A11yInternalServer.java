@@ -43,6 +43,7 @@ public class A11yInternalServer extends NanoHTTPD {
     private final CameraHandler cameraHandler;
     private final RouteHandler overlayHandler;
     private final RouteHandler sessionHandler;
+    private final AppHandler appHandler;
 
     public A11yInternalServer(AccessibilityBridge bridge) {
         super("127.0.0.1", 7334);
@@ -69,6 +70,7 @@ public class A11yInternalServer extends NanoHTTPD {
         this.smsHandler = new SmsHandler(ctx);
         this.fileHandler = new FileHandler(ctx);
         this.cameraHandler = new CameraHandler(ctx);
+        this.appHandler = new AppHandler(bridge);
         this.overlayHandler = (method, path, params, body) -> {
             OverlayManager overlay = OverlayManager.getInstanceOrNull();
             if (overlay == null) return "{\"error\":\"overlay not initialized\",\"hint\":\"AccessibilityBridge may not be connected\"}";
@@ -209,6 +211,7 @@ public class A11yInternalServer extends NanoHTTPD {
 
     private RouteHandler resolveHandler(String path) {
         // All paths are prefixed with /a11y/ from the proxy
+        if ("/a11y/screen/fast".equals(path)) return screenHandler;  // fast screen state
         if (path.startsWith("/a11y/screen/")) return screenControlHandler; // /screen/lock etc.
         if (path.startsWith("/a11y/screen")) return screenHandler;         // /screen, /screenshot
 
@@ -244,6 +247,9 @@ public class A11yInternalServer extends NanoHTTPD {
         if ("/a11y/sms".equals(path)) return smsHandler;
         if (path.startsWith("/a11y/file")) return fileHandler;
         if ("/a11y/camera".equals(path)) return cameraHandler;
+
+        // App management
+        if (path.startsWith("/a11y/app/")) return appHandler;
 
         // Session management
         if (path.startsWith("/a11y/session/")) return sessionHandler;

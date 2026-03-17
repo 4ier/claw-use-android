@@ -419,11 +419,30 @@ public class ScreenControlHandler implements RouteHandler {
         boolean isLocked = km != null && km.isKeyguardLocked();
         boolean isSecure = km != null && km.isDeviceSecure();
 
-        return new JSONObject()
+        JSONObject result = new JSONObject()
                 .put("screenOn", isScreenOn())
                 .put("locked", isLocked)
-                .put("secure", isSecure)
-                .toString();
+                .put("secure", isSecure);
+
+        // Add foreground package — fast, no tree traversal needed
+        AccessibilityBridge b = getBridge();
+        if (b != null) {
+            String fgPkg = SafeA11y.run(() -> {
+                AccessibilityNodeInfo root = b.getRootNode();
+                if (root == null) return "";
+                try {
+                    CharSequence pkg = root.getPackageName();
+                    return pkg != null ? pkg.toString() : "";
+                } finally {
+                    root.recycle();
+                }
+            }, 1500);
+            if (fgPkg != null) {
+                result.put("foregroundPackage", fgPkg);
+            }
+        }
+
+        return result.toString();
     }
 
     private void wakeScreen() {

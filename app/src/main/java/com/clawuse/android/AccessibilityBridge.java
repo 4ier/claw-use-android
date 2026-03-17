@@ -131,52 +131,76 @@ public class AccessibilityBridge extends AccessibilityService {
         }
     }
 
-    /** Find a node by text (case-insensitive partial match). */
     /**
-     * Find a node by text. Two-pass: exact match first, then contains fallback.
-     * This prevents "eau" matching "nouveau" when an exact "eau" node exists.
+     * Find a node by text using system API (single IPC call to system_server).
+     * Two-pass: exact match first, then first contains match.
+     *
+     * OLD approach: manual DFS = N nodes × ~7 IPC calls each = thousands of Binder roundtrips.
+     * NEW approach: findAccessibilityNodeInfosByText() = 1 IPC call, search runs in system_server.
      */
     public AccessibilityNodeInfo findByText(AccessibilityNodeInfo root, String text) {
         if (root == null || text == null || text.isEmpty()) return null;
-        // Pass 1: exact match (case-insensitive)
-        AccessibilityNodeInfo exact = findByTextPass(root, text, true);
-        if (exact != null) return exact;
-        // Pass 2: contains match (case-insensitive)
-        return findByTextPass(root, text, false);
-    }
 
-    private AccessibilityNodeInfo findByTextPass(AccessibilityNodeInfo root, String text, boolean exactOnly) {
-        if (root == null) return null;
-        String nodeText = root.getText() != null ? root.getText().toString() : "";
+        // System API: searches in system_server process, single IPC
+        List<AccessibilityNodeInfo> results = root.findAccessibilityNodeInfosByText(text);
+        if (results == null || results.isEmpty()) return null;
+
         String lower = text.toLowerCase();
-        if (exactOnly) {
-            if (nodeText.toLowerCase().equals(lower)) return root;
-        } else {
-            if (!nodeText.isEmpty() && nodeText.toLowerCase().contains(lower)) return root;
-        }
-        for (int i = 0; i < root.getChildCount(); i++) {
-            AccessibilityNodeInfo child = root.getChild(i);
-            if (child != null) {
-                AccessibilityNodeInfo found = findByTextPass(child, text, exactOnly);
-                if (found != null) {
-                    if (found != child) child.recycle();
-                    return found;
+
+        // Pass 1: exact match (case-insensitive)
+        for (AccessibilityNodeInfo node : results) {
+            String nodeText = node.getText() != null ? node.getText().toString() : "";
+            if (nodeText.toLowerCase().equals(lower)) {
+                // Recycle all others
+                for (AccessibilityNodeInfo other : results) {
+                    if (other != node) {
+                        try { other.recycle(); } catch (Exception ignored) {}
+                    }
                 }
-                child.recycle();
+                return node;
             }
         }
-        return null;
+
+        // Pass 2: return first contains match, recycle the rest
+        AccessibilityNodeInfo first = results.get(0);
+        for (int i = 1; i < results.size(); i++) {
+            try { results.get(i).recycle(); } catch (Exception ignored) {}
+        }
+        return first;
     }
 
-    /** Find a node by resource ID (partial match). */
+    /**
+     * Find a node by resource ID using system API (single IPC call).
+     * findAccessibilityNodeInfosByViewId() requires full resource name like
+     * "com.android.settings:id/title". For partial IDs, falls back to
+     * depth-limited manual search.
+     */
     public AccessibilityNodeInfo findById(AccessibilityNodeInfo root, String id) {
-        if (root == null) return null;
-        String nodeId = root.getViewIdResourceName() != null ? root.getViewIdResourceName() : "";
-        if (!id.isEmpty() && nodeId.contains(id)) return root;
-        for (int i = 0; i < root.getChildCount(); i++) {
-            AccessibilityNodeInfo child = root.getChild(i);
+        if (root == null || id == null || id.isEmpty()) return null;
+
+        // System API works best with fully-qualified IDs (package:id/name)
+        // Try it first — single IPC call
+        List<AccessibilityNodeInfo> results = root.findAccessibilityNodeInfosByViewId(id);
+        if (results != null && !results.isEmpty()) {
+            AccessibilityNodeInfo first = results.get(0);
+            for (int i = 1; i < results.size(); i++) {
+                try { results.get(i).recycle(); } catch (Exception ignored) {}
+            }
+            return first;
+        }
+
+        // Fallback for partial IDs: depth-limited manual search (max depth 15)
+        return findByIdManual(root, id, 0, 15);
+    }
+
+    private AccessibilityNodeInfo findByIdManual(AccessibilityNodeInfo node, String id, int depth, int maxDepth) {
+        if (node == null || depth > maxDepth) return null;
+        String nodeId = node.getViewIdResourceName() != null ? node.getViewIdResourceName() : "";
+        if (!nodeId.isEmpty() && nodeId.contains(id)) return node;
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
             if (child != null) {
-                AccessibilityNodeInfo found = findById(child, id);
+                AccessibilityNodeInfo found = findByIdManual(child, id, depth + 1, maxDepth);
                 if (found != null) {
                     if (found != child) child.recycle();
                     return found;
@@ -187,15 +211,23 @@ public class AccessibilityBridge extends AccessibilityService {
         return null;
     }
 
-    /** Find a node by content description (case-insensitive partial match). */
+    /**
+     * Find a node by content description (case-insensitive partial match).
+     * No system API for desc search — manual traversal with depth limit.
+     */
     public AccessibilityNodeInfo findByDesc(AccessibilityNodeInfo root, String desc) {
-        if (root == null) return null;
-        String nodeDesc = root.getContentDescription() != null ? root.getContentDescription().toString() : "";
-        if (!desc.isEmpty() && nodeDesc.toLowerCase().contains(desc.toLowerCase())) return root;
-        for (int i = 0; i < root.getChildCount(); i++) {
-            AccessibilityNodeInfo child = root.getChild(i);
+        if (root == null || desc == null || desc.isEmpty()) return null;
+        return findByDescDepthLimited(root, desc.toLowerCase(), 0, 15);
+    }
+
+    private AccessibilityNodeInfo findByDescDepthLimited(AccessibilityNodeInfo node, String descLower, int depth, int maxDepth) {
+        if (node == null || depth > maxDepth) return null;
+        String nodeDesc = node.getContentDescription() != null ? node.getContentDescription().toString() : "";
+        if (!nodeDesc.isEmpty() && nodeDesc.toLowerCase().contains(descLower)) return node;
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
             if (child != null) {
-                AccessibilityNodeInfo found = findByDesc(child, desc);
+                AccessibilityNodeInfo found = findByDescDepthLimited(child, descLower, depth + 1, maxDepth);
                 if (found != null) {
                     if (found != child) child.recycle();
                     return found;

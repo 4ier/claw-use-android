@@ -12,6 +12,7 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import com.clawuse.android.AccessibilityBridge;
 import com.clawuse.android.SafeA11y;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.Map;
@@ -96,7 +97,7 @@ public class GestureHandler implements RouteHandler {
                     if (!id.isEmpty()) result.put("matchedId", id);
                     if (!desc.isEmpty()) result.put("matchedDesc", desc);
                     if (attempt > 0) result.put("attempts", attempt + 1);
-                    return result.toString();
+                    return maybeVerify(result, req, bridge);
                 }
             } finally {
                 root.recycle();
@@ -112,8 +113,9 @@ public class GestureHandler implements RouteHandler {
         int x = req.getInt("x");
         int y = req.getInt("y");
         boolean tapped = bridge.tap(x, y);
-        return new JSONObject()
-                .put("tapped", tapped).put("x", x).put("y", y).toString();
+        JSONObject result = new JSONObject()
+                .put("tapped", tapped).put("x", x).put("y", y);
+        return maybeVerify(result, req, bridge);
     }
 
     private String handleLongPress(AccessibilityBridge bridge, JSONObject req) throws Exception {
@@ -182,11 +184,12 @@ public class GestureHandler implements RouteHandler {
         }
 
         boolean swiped = bridge.swipe(x1, y1, x2, y2, durationMs);
-        return new JSONObject()
+        JSONObject result = new JSONObject()
                 .put("swiped", swiped)
                 .put("from", x1 + "," + y1)
                 .put("to", x2 + "," + y2)
-                .put("durationMs", durationMs).toString();
+                .put("durationMs", durationMs);
+        return maybeVerify(result, req, bridge);
     }
 
     private String handleType(AccessibilityBridge bridge, JSONObject req) throws Exception {
@@ -266,6 +269,40 @@ public class GestureHandler implements RouteHandler {
     }
 
     // ── Helpers ──────────────────────────────────────────────────
+
+    /**
+     * Get post-action state for verification. Depth ≤ 2 traversal, 1500ms timeout.
+     * Returns a JSONObject with {package, topTexts} or null on failure.
+     */
+    private JSONObject getPostState(AccessibilityBridge bridge) {
+        try {
+            String stateJson = SafeA11y.run(() -> {
+                return ScreenHandler.buildQuickState(bridge, 2, 10, 0);
+            }, 1500);
+            if (stateJson == null) return null;
+            JSONObject full = new JSONObject(stateJson);
+            JSONObject post = new JSONObject();
+            post.put("package", full.optString("package", ""));
+            post.put("topTexts", full.optJSONArray("topTexts"));
+            return post;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * If verify is requested, sleep 300ms then attach post-action state to result.
+     */
+    private String maybeVerify(JSONObject result, JSONObject req, AccessibilityBridge bridge) throws Exception {
+        if (req.optBoolean("verify", false)) {
+            Thread.sleep(300);
+            JSONObject post = getPostState(bridge);
+            if (post != null) {
+                result.put("post", post);
+            }
+        }
+        return result.toString();
+    }
 
     private AccessibilityNodeInfo findFocusedEditable(AccessibilityNodeInfo node) {
         if (node == null) return null;

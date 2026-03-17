@@ -707,7 +707,8 @@ public class BridgeService extends Service {
             return path.startsWith("/screen") || path.equals("/click") || path.equals("/tap")
                     || path.equals("/longpress") || path.equals("/swipe")
                     || path.equals("/type") || path.equals("/scroll")
-                    || path.equals("/global") || path.equals("/flow");
+                    || path.equals("/global") || path.equals("/flow")
+                    || path.startsWith("/app/");
         }
 
         private Response handleLocal(RouteHandler handler, String method, String path,

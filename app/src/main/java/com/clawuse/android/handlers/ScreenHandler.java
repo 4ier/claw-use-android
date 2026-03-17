@@ -40,6 +40,9 @@ public class ScreenHandler implements RouteHandler {
 
     @Override
     public String handle(String method, String path, Map<String, String> params, String body) throws Exception {
+        if (path.equals("/screen/fast")) {
+            return handleScreenFast();
+        }
         if (path.startsWith("/screenshot")) {
             int quality = 50;
             if (params.containsKey("quality")) {
@@ -214,6 +217,97 @@ public class ScreenHandler implements RouteHandler {
         }
 
         return result;
+    }
+
+    /**
+     * /screen/fast — lightweight screen state for quick "where am I?" checks.
+     * Depth ≤ 3 traversal only, 2000ms timeout. Minimizes Binder IPC calls.
+     */
+    private String handleScreenFast() throws Exception {
+        AccessibilityBridge b = getBridge();
+        if (b == null) {
+            return "{\"error\":\"accessibility service not running\"}";
+        }
+
+        if (SafeA11y.isWorkerBusy()) {
+            return "{\"error\":\"accessibility worker busy\"}";
+        }
+
+        String result = SafeA11y.run(() -> {
+            return buildQuickState(b, 3, 10, 5);
+        }, 2000);
+
+        if (result == null) {
+            return "{\"error\":\"screen/fast timed out\"}";
+        }
+        return result;
+    }
+
+    /**
+     * Build a lightweight screen state JSON by traversing to maxDepth only.
+     * Collects up to maxTexts text values and maxDescs content descriptions.
+     * Depth-limited to minimize Binder IPC calls (each getChild/getText is an IPC).
+     * Reusable by other handlers (e.g. post-action verification).
+     */
+    public static String buildQuickState(AccessibilityBridge bridge, int maxDepth, int maxTexts, int maxDescs) throws Exception {
+        AccessibilityNodeInfo root = bridge.getRootNode();
+        if (root == null) {
+            return "{\"error\":\"no active window\"}";
+        }
+
+        try {
+            JSONObject json = new JSONObject();
+            CharSequence pkg = root.getPackageName();
+            json.put("package", pkg != null ? pkg.toString() : "");
+            json.put("timestamp", System.currentTimeMillis());
+
+            JSONArray topTexts = new JSONArray();
+            JSONArray topDescs = new JSONArray();
+            int[] counter = {0}; // nodes traversed
+
+            collectQuickInfo(root, topTexts, topDescs, counter, 0, maxDepth, maxTexts, maxDescs);
+
+            json.put("topTexts", topTexts);
+            json.put("topDescs", topDescs);
+            json.put("count", counter[0]);
+            return json.toString();
+        } finally {
+            root.recycle();
+        }
+    }
+
+    private static void collectQuickInfo(AccessibilityNodeInfo node, JSONArray texts, JSONArray descs,
+                                          int[] counter, int depth, int maxDepth, int maxTexts, int maxDescs) {
+        if (node == null || depth > maxDepth || Thread.currentThread().isInterrupted()) return;
+        counter[0]++;
+
+        try {
+            if (texts.length() < maxTexts) {
+                CharSequence text = node.getText();
+                if (text != null && text.length() > 0) {
+                    texts.put(text.toString());
+                }
+            }
+            if (descs.length() < maxDescs) {
+                CharSequence desc = node.getContentDescription();
+                if (desc != null && desc.length() > 0) {
+                    descs.put(desc.toString());
+                }
+            }
+
+            // Stop descending if we have enough info or hit depth limit
+            if (depth >= maxDepth) return;
+            if (texts.length() >= maxTexts && descs.length() >= maxDescs) return;
+
+            for (int i = 0; i < node.getChildCount(); i++) {
+                if (texts.length() >= maxTexts && descs.length() >= maxDescs) return;
+                AccessibilityNodeInfo child = node.getChild(i);
+                if (child != null) {
+                    collectQuickInfo(child, texts, descs, counter, depth + 1, maxDepth, maxTexts, maxDescs);
+                    child.recycle();
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     private void traverseNode(AccessibilityNodeInfo node, JSONArray nodes, int depth, boolean compact, AtomicBoolean cancelled) {
