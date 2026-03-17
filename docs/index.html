@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Claw Use Android — Full Phone Control via HTTP</title>
 <meta name="description" content="One Android app, 37 HTTP API endpoints, full phone control. No ADB, no root, no PC required.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -184,9 +185,8 @@ View on GitHub
 <a href="#api" class="btn btn-secondary">Explore API →</a>
 </div>
 </div>
-<div class="placeholder" style="min-height:420px;border-radius:12px">
-<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18.01" stroke-width="2"/></svg>
-<span>Phone screenshot coming soon</span>
+<div style="background:#000;border:3px solid #333;border-radius:24px;padding:12px 8px;box-shadow:0 8px 32px rgba(0,0,0,0.6),0 0 0 1px rgba(255,255,255,0.05);max-width:280px;margin:0 auto">
+<img src="assets/claw-use-app.jpg" alt="Claw Use Android app showing service status, HTTP server running on port 7333, with accessibility service enabled" loading="lazy" style="width:100%;max-height:420px;object-fit:contain;border-radius:16px;display:block">
 </div>
 </div>
 </div>
@@ -198,7 +198,7 @@ View on GitHub
 <div class="stats-grid reveal">
 <div class="stat-item"><div class="num">37</div><div class="label">API Endpoints</div></div>
 <div class="stat-item"><div class="num">0</div><div class="label">Root Required</div></div>
-<div class="stat-item"><div class="num">6</div><div class="label">API Categories</div></div>
+<div class="stat-item"><div class="num">7</div><div class="label">API Categories</div></div>
 <div class="stat-item"><div class="num">&lt;1s</div><div class="label">Setup Time</div></div>
 </div>
 </div>
@@ -239,9 +239,15 @@ View on GitHub
 </div>
 </div>
 
-<div class="how-placeholder placeholder reveal" style="min-height:200px;margin-top:48px">
-<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-<span>Setup flow screenshots coming soon</span>
+<div class="reveal" style="margin-top:48px;display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start">
+<div style="background:#000;border:2px solid #333;border-radius:20px;padding:10px 6px;box-shadow:0 4px 24px rgba(0,0,0,0.5)">
+<img src="assets/claw-use-app.jpg" alt="Claw Use Android app main screen showing HTTP server active and accessibility service status" loading="lazy" style="width:100%;border-radius:14px;display:block">
+<p style="text-align:center;font-family:var(--mono);font-size:.7rem;color:var(--text-muted);margin-top:8px">The app — service running</p>
+</div>
+<div style="background:#000;border:2px solid #333;border-radius:20px;padding:10px 6px;box-shadow:0 4px 24px rgba(0,0,0,0.5)">
+<img src="assets/demo-settings.jpg" alt="Android Settings app being controlled remotely via Claw Use HTTP API, showing Chinese language UI" loading="lazy" style="width:100%;border-radius:14px;display:block">
+<p style="text-align:center;font-family:var(--mono);font-size:.7rem;color:var(--text-muted);margin-top:8px">Settings — controlled via HTTP</p>
+</div>
 </div>
 </div>
 </section>
@@ -249,7 +255,7 @@ View on GitHub
 <section class="section" id="api" style="background:var(--bg-raised);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
 <div class="container">
 <div class="section-label reveal">API Reference</div>
-<h2 class="section-title reveal">37 endpoints, 6 categories</h2>
+<h2 class="section-title reveal">37 endpoints, 7 categories</h2>
 <p class="section-desc reveal">Every endpoint returns JSON. Authenticate with the <code style="font-family:var(--mono);color:var(--green);background:var(--bg);padding:2px 8px;border-radius:3px;font-size:.85rem">X-Bridge-Token</code> header.</p>
 
 <div class="api-tabs reveal">
@@ -476,9 +482,11 @@ View on GitHub
 </div>
 </div>
 
-<div class="placeholder reveal" style="min-height:200px;margin-top:32px">
-<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-<span>Live API demo recording coming soon</span>
+<div class="reveal" style="margin-top:32px;text-align:center">
+<p style="font-family:var(--mono);font-size:.8rem;color:var(--text-muted);margin-bottom:16px">▶ AI agent navigating Settings, WiFi, and browser on a Xiaomi Pad 5</p>
+<div style="display:inline-block;border:3px solid #1a1a1a;border-radius:16px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.5)">
+<img src="assets/demo-navigation.gif" alt="Demo: AI agent navigating through Android apps via HTTP API" loading="lazy" style="display:block;max-width:360px;width:100%">
+</div>
 </div>
 </div>
 </section>
@@ -489,26 +497,43 @@ View on GitHub
 <h2 class="section-title reveal">Built for real problems</h2>
 <p class="section-desc reveal">Not a toy. People use this to solve actual problems with actual phones.</p>
 
-<div class="cases-grid reveal">
-<div class="case-card">
-<div class="case-icon">🤖</div>
-<h3>AI Agent with a Real Phone</h3>
-<p>Give your LLM agent a real Android device. Read screens, tap buttons, type messages, take photos, check notifications — all through structured HTTP APIs that any agent framework can call.</p>
+<div class="cases-grid reveal" style="grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(3,auto)">
+<div class="case-card" style="position:relative">
+<span style="position:absolute;top:16px;right:16px;font-family:var(--mono);font-size:.65rem;background:rgba(0,255,136,0.1);color:var(--green);padding:3px 10px;border-radius:3px;border:1px solid rgba(0,255,136,0.2)">Real Case</span>
+<div class="case-icon">🦉</div>
+<h3>AI 帮你刷多邻国<br><span style="font-size:.8rem;font-weight:400;color:var(--text-dim)">AI Does Your Duolingo</span></h3>
+<p style="font-family:var(--mono);font-size:.82rem;color:var(--green);margin:8px 0 12px">"81-day streak? The AI maintained it."</p>
+<p>Your friend is learning French on Duolingo. You point Claw Use at her phone, and an AI agent reads each question, figures out the answer, taps the right options. Multiple choice, word arrangement, fill-in-the-blank — all handled. The streak lives on.</p>
 </div>
 <div class="case-card">
-<div class="case-icon">🔧</div>
-<h3>Revive Broken Phones</h3>
-<p>Cracked screen? Dead touch? USB port gone? If WiFi still works, you can control the entire phone over HTTP. Transfer files, read messages, even set up a new device — no physical interaction needed.</p>
+<div class="case-icon">📱</div>
+<h3>碎屏手机满血复活<br><span style="font-size:.8rem;font-weight:400;color:var(--text-dim)">Cracked Screen? Full Recovery</span></h3>
+<p style="font-family:var(--mono);font-size:.82rem;color:var(--green);margin:8px 0 12px">"WiFi works = full control. No screen needed."</p>
+<p>Touch digitizer dead, USB port corroded. But WiFi connects. Install the APK via ADB once, and you've got 37 HTTP endpoints to transfer photos, read messages, back up contacts, even set up a replacement phone — all without touching the screen.</p>
 </div>
 <div class="case-card">
 <div class="case-icon">🌍</div>
-<h3>Remote Phone Access</h3>
-<p>Install Tailscale on the device, and you've got secure remote access from anywhere in the world. Check cameras, read notifications, trigger automations — your phone becomes a remote-controllable node.</p>
+<h3>Tailscale 远程遥控<br><span style="font-size:.8rem;font-weight:400;color:var(--text-dim)">Control Your Phone from Anywhere</span></h3>
+<p style="font-family:var(--mono);font-size:.82rem;color:var(--green);margin:8px 0 12px">"Your phone is now a remote node on your mesh network."</p>
+<p>Install Tailscale on the phone, enable Claw Use. Now from your laptop at a coffee shop, you can check your home security camera app, read a verification code that arrived via SMS, or trigger a smart home routine. The phone sits at home, always connected.</p>
+</div>
+<div class="case-card">
+<div class="case-icon">👴</div>
+<h3>远程帮爸妈操作手机<br><span style="font-size:.8rem;font-weight:400;color:var(--text-dim)">Tech Support for Parents, Reimagined</span></h3>
+<p style="font-family:var(--mono);font-size:.82rem;color:var(--green);margin:8px 0 12px">"Stop saying 'click the gear icon'. Just click it for them."</p>
+<p>Mom calls: "I can't find the WiFi settings." Instead of a 20-minute phone tutorial, you SSH into her phone's Claw Use endpoint, read the screen, navigate to Settings &gt; WiFi, connect to the right network. Done in 30 seconds. She thinks you're a wizard.</p>
+</div>
+<div class="case-card">
+<div class="case-icon">🤖</div>
+<h3>给 AI Agent 一部真手机<br><span style="font-size:.8rem;font-weight:400;color:var(--text-dim)">Give Your LLM a Real Phone</span></h3>
+<p style="font-family:var(--mono);font-size:.82rem;color:var(--green);margin:8px 0 12px">"37 endpoints. Real hardware. No emulator."</p>
+<p>Your agent framework calls /screen to perceive, /click to act, /screenshot for vision models. It's not a simulator — it's a real Android device with a real SIM card, real apps, real notifications. The agent can send WhatsApp messages, check bank apps, take photos. Computer Use, but for phones.</p>
 </div>
 <div class="case-card">
 <div class="case-icon">⚙️</div>
-<h3>Spare Phone Automation</h3>
-<p>Turn that old phone in your drawer into a dedicated worker. Run automated flows, monitor apps, scrape data, send scheduled messages — all orchestrated from your server or another device.</p>
+<h3>旧手机变 Always-On 工作站<br><span style="font-size:.8rem;font-weight:400;color:var(--text-dim)">Spare Phone → Dedicated Worker</span></h3>
+<p style="font-family:var(--mono);font-size:.82rem;color:var(--green);margin:8px 0 12px">"That drawer phone? It has a job now."</p>
+<p>Old phone + charger + WiFi = a dedicated automation node. Run scheduled tasks: check app prices daily, screenshot competitor dashboards, send good-morning messages, monitor delivery status. Plug it in, forget about it. It works while you sleep.</p>
 </div>
 </div>
 </div>
