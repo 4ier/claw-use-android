@@ -42,6 +42,7 @@ public class A11yInternalServer extends NanoHTTPD {
     private final FileHandler fileHandler;
     private final CameraHandler cameraHandler;
     private final RouteHandler overlayHandler;
+    private final RouteHandler sessionHandler;
 
     public A11yInternalServer(AccessibilityBridge bridge) {
         super("127.0.0.1", 7334);
@@ -70,16 +71,98 @@ public class A11yInternalServer extends NanoHTTPD {
         this.cameraHandler = new CameraHandler(ctx);
         this.overlayHandler = (method, path, params, body) -> {
             OverlayManager overlay = OverlayManager.getInstanceOrNull();
-            if (overlay == null) return "{\"error\":\"overlay not initialized\"}";
+            if (overlay == null) return "{\"error\":\"overlay not initialized\",\"hint\":\"AccessibilityBridge may not be connected\"}";
             String action = params.getOrDefault("action", "status");
-            if ("activity".equals(action)) {
-                if (overlay.isTakenOver()) {
-                    return "{\"paused\":true,\"reason\":\"user takeover\",\"hint\":\"user has taken control, retry later\"}";
+            switch (action) {
+                case "log": {
+                    if (overlay.isTakenOver()) {
+                        return "{\"paused\":true,\"reason\":\"user takeover\"}";
+                    }
+                    String desc = params.getOrDefault("desc", "⚡ 操作");
+                    overlay.logOperation(desc);
+                    return "{\"paused\":false,\"logged\":true}";
                 }
-                overlay.onApiActivity();
-                return "{\"paused\":false}";
+                case "activity": {
+                    if (overlay.isTakenOver()) {
+                        return "{\"paused\":true,\"reason\":\"user takeover\"}";
+                    }
+                    overlay.onApiActivity();
+                    return "{\"paused\":false}";
+                }
+                case "test": {
+                    overlay.logOperation("🧪 Overlay 测试");
+                    String err = overlay.getLastError();
+                    return "{\"test\":true,\"takenOver\":" + overlay.isTakenOver()
+                            + ",\"error\":" + (err != null ? "\"" + err + "\"" : "null") + "}";
+                }
+                default:
+                    return "{\"takenOver\":" + overlay.isTakenOver() + ",\"initialized\":true}";
             }
-            return "{\"takenOver\":" + overlay.isTakenOver() + "}";
+        };
+        this.sessionHandler = (method, path, params, body) -> {
+            SessionManager sm = SessionManager.get();
+            // path already has /a11y stripped, so it's /session/start, /session/end, /session/status
+            if ("/session/start".equals(path) && "POST".equals(method)) {
+                try {
+                    org.json.JSONObject req = (body != null && !body.isEmpty())
+                            ? new org.json.JSONObject(body) : new org.json.JSONObject();
+                    String agentName = req.optString("agentName", "Unknown Agent");
+                    String goal = req.optString("goal", "");
+                    long timeoutMs = req.optLong("timeoutMs", 60000);
+
+                    // Check if session already active
+                    SessionManager.SessionInfo existing = sm.getActiveSession();
+                    if (existing != null) {
+                        org.json.JSONObject err = new org.json.JSONObject();
+                        err.put("error", "session_already_active");
+                        err.put("sessionId", existing.sessionId);
+                        return err.toString();
+                    }
+
+                    String sessionId = sm.startSession(agentName, goal, timeoutMs);
+                    if (sessionId == null) {
+                        return "{\"error\":\"failed to start session\"}";
+                    }
+                    org.json.JSONObject resp = new org.json.JSONObject();
+                    resp.put("sessionId", sessionId);
+                    resp.put("status", "active");
+                    return resp.toString();
+                } catch (Exception e) {
+                    return "{\"error\":\"" + e.getMessage() + "\"}";
+                }
+            } else if ("/session/end".equals(path) && "POST".equals(method)) {
+                try {
+                    org.json.JSONObject req = (body != null && !body.isEmpty())
+                            ? new org.json.JSONObject(body) : new org.json.JSONObject();
+                    String sessionId = req.optString("sessionId", "");
+                    String result = req.optString("result", "ended");
+
+                    SessionManager.SessionInfo info = sm.endSession(sessionId, result);
+                    if (info == null) {
+                        return "{\"error\":\"session not found or not active\"}";
+                    }
+                    org.json.JSONObject resp = new org.json.JSONObject();
+                    resp.put("status", "ended");
+                    resp.put("durationMs", info.getDurationMs());
+                    resp.put("actions", info.actionCount);
+                    return resp.toString();
+                } catch (Exception e) {
+                    return "{\"error\":\"" + e.getMessage() + "\"}";
+                }
+            } else if ("/session/status".equals(path) && "GET".equals(method)) {
+                SessionManager.SessionInfo active = sm.getActiveSession();
+                if (active == null) {
+                    return "{\"active\":false}";
+                }
+                try {
+                    org.json.JSONObject resp = active.toJson();
+                    resp.put("active", true);
+                    return resp.toString();
+                } catch (Exception e) {
+                    return "{\"active\":false,\"error\":\"" + e.getMessage() + "\"}";
+                }
+            }
+            return "{\"error\":\"unknown session endpoint\"}";
         };
     }
 
@@ -161,6 +244,9 @@ public class A11yInternalServer extends NanoHTTPD {
         if ("/a11y/sms".equals(path)) return smsHandler;
         if (path.startsWith("/a11y/file")) return fileHandler;
         if ("/a11y/camera".equals(path)) return cameraHandler;
+
+        // Session management
+        if (path.startsWith("/a11y/session/")) return sessionHandler;
 
         return null;
     }

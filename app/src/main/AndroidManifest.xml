@@ -64,6 +64,9 @@
     <!-- Install APK (self-update) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Overlay window for AI operation HUD -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <application
         android:label="Claw Use"
         android:icon="@android:drawable/ic_menu_compass"
@@ -80,6 +83,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Permission Gate — transparent dialog for agent authorization -->
+        <activity
+            android:name=".PermissionGateActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:showOnLockScreen="true" />
 
         <!-- HTTP Bridge Foreground Service — runs in separate :http process -->
         <service

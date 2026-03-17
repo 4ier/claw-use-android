@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Claw Use</string>
+
+    <!-- Permission Gate -->
+    <string name="permission_title">AI Agent 请求控制你的手机</string>
+    <string name="permission_source">来源</string>
+    <string name="permission_agent">Agent</string>
+    <string name="permission_trust">信任此 Agent，后续自动允许</string>
+    <string name="permission_deny">拒绝</string>
+    <string name="permission_allow">允许</string>
+
+    <!-- Overlay -->
+    <string name="overlay_takeover">接管</string>
+    <string name="overlay_goal">目标</string>
+    <string name="overlay_steps">步</string>
+    <string name="overlay_taken_over">已接管</string>
+
+    <!-- Action descriptions -->
+    <string name="action_read_screen">读取屏幕</string>
+    <string name="action_screenshot">截图</string>
+    <string name="action_tap">点击</string>
+    <string name="action_click">点击</string>
+    <string name="action_type">输入</string>
+    <string name="action_swipe">滑动</string>
+    <string name="action_scroll">滚动</string>
+    <string name="action_launch">启动</string>
+    <string name="action_back">返回</string>
+    <string name="action_home">主页</string>
+    <string name="action_speak">朗读</string>
+
+    <!-- Session -->
+    <string name="session_timeout">会话超时</string>
+    <string name="session_active">会话进行中</string>
+</resources>

@@ -4,4 +4,35 @@
     <string name="accessibility_description">Claw Use Android — exposes device capabilities via HTTP API for AI agent control. Reads UI tree, performs gestures, and monitors notifications.</string>
     <string name="notification_channel_name">Bridge Service</string>
     <string name="notification_channel_desc">Keeps the HTTP bridge running in the background</string>
+
+    <!-- Permission Gate -->
+    <string name="permission_title">AI Agent requests phone control</string>
+    <string name="permission_source">Source</string>
+    <string name="permission_agent">Agent</string>
+    <string name="permission_trust">Trust this Agent, auto-allow later</string>
+    <string name="permission_deny">Deny</string>
+    <string name="permission_allow">Allow</string>
+
+    <!-- Overlay -->
+    <string name="overlay_takeover">Take Over</string>
+    <string name="overlay_goal">Goal</string>
+    <string name="overlay_steps">steps</string>
+    <string name="overlay_taken_over">Taken Over</string>
+
+    <!-- Action descriptions -->
+    <string name="action_read_screen">Reading screen</string>
+    <string name="action_screenshot">Screenshot</string>
+    <string name="action_tap">Tap</string>
+    <string name="action_click">Click</string>
+    <string name="action_type">Type</string>
+    <string name="action_swipe">Swipe</string>
+    <string name="action_scroll">Scroll</string>
+    <string name="action_launch">Launch</string>
+    <string name="action_back">Back</string>
+    <string name="action_home">Home</string>
+    <string name="action_speak">Speak</string>
+
+    <!-- Session -->
+    <string name="session_timeout">Session timed out</string>
+    <string name="session_active">Session active</string>
 </resources>

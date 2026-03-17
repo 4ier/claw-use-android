@@ -31,6 +31,8 @@ import java.net.NetworkInterface;
 import java.net.URL;
 import java.util.Collections;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import fi.iki.elonen.NanoHTTPD;
 
@@ -53,6 +55,7 @@ public class BridgeService extends Service {
     private BridgeHttpServer server;
     private TokenManager tokenManager;
     private ConfigStore configStore;
+    private TrustStore trustStore;
     private static volatile BridgeService instance;
 
     // Local handlers
@@ -73,6 +76,7 @@ public class BridgeService extends Service {
         instance = this;
         tokenManager = new TokenManager(this);
         configStore = ConfigStore.get(this);
+        trustStore = TrustStore.get(this);
         infoHandler = new InfoHandler(this);
         launchHandler = new LaunchHandler(this);
         notificationManager = getSystemService(NotificationManager.class);
@@ -337,6 +341,59 @@ public class BridgeService extends Service {
         }
     }
 
+    // ── Permission Gate ─────────────────────────────────────────
+
+    /**
+     * Launch PermissionGateActivity and block until user responds (up to 30s).
+     * Returns null if allowed, or a 403 Response if denied.
+     */
+    private NanoHTTPD.Response launchPermissionGate(String token, String agentName,
+                                                     NanoHTTPD.IHTTPSession httpSession) {
+        try {
+            // Extract source IP from the HTTP session
+            String sourceIp = httpSession.getHeaders().get("http-client-ip");
+            if (sourceIp == null) sourceIp = httpSession.getHeaders().get("remote-addr");
+            if (sourceIp == null) sourceIp = "unknown";
+
+            CompletableFuture<PermissionGateActivity.GateResult> future =
+                    PermissionGateActivity.prepare(agentName, sourceIp);
+
+            Intent gateIntent = new Intent(this, PermissionGateActivity.class);
+            gateIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+            startActivity(gateIntent);
+
+            // Block thread up to 30s waiting for user decision
+            PermissionGateActivity.GateResult result = future.get(30, TimeUnit.SECONDS);
+
+            if (result.allowed) {
+                // Trust if checkbox was checked
+                if (result.trustAgent) {
+                    trustStore.trust(token, agentName);
+                }
+                // Start a session if none exists
+                SessionManager.SessionInfo active = SessionManager.get().getActiveSession();
+                if (active == null) {
+                    SessionManager.get().startSession(agentName, "", 60000);
+                }
+                return null; // proceed
+            } else {
+                return NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.FORBIDDEN,
+                        "application/json; charset=UTF-8",
+                        "{\"error\":\"user_denied\"}");
+            }
+        } catch (java.util.concurrent.TimeoutException e) {
+            Log.w(TAG, "Permission gate timed out for agent: " + agentName);
+            return NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.FORBIDDEN,
+                    "application/json; charset=UTF-8",
+                    "{\"error\":\"user_denied\",\"reason\":\"timeout\"}");
+        } catch (Exception e) {
+            Log.e(TAG, "Permission gate error", e);
+            return NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.FORBIDDEN,
+                    "application/json; charset=UTF-8",
+                    "{\"error\":\"permission_gate_error\",\"detail\":\"" + e.getMessage() + "\"}");
+        }
+    }
+
     // ── HTTP Server ─────────────────────────────────────────────
 
     private class BridgeHttpServer extends NanoHTTPD {
@@ -379,28 +436,29 @@ public class BridgeService extends Service {
             // Takeover check + overlay trigger via internal server (main process)
             if (!"/status".equals(path) && !"/config".equals(path)
                     && !"/info".equals(path) && !"/permissions".equals(path)
-                    && !"/ping".equals(path) && !"/launch".equals(path)) {
-                // Quick check: is user takeover active? (via internal HTTP endpoint)
+                    && !"/ping".equals(path) && !"/overlay".equals(path)) {
                 try {
-                    java.net.URL url = new java.net.URL("http://127.0.0.1:" + A11Y_PORT + "/a11y/overlay?action=activity");
+                    String desc = java.net.URLEncoder.encode(
+                            OverlayManager.describeOperation(method, path), "UTF-8");
+                    java.net.URL url = new java.net.URL("http://127.0.0.1:" + A11Y_PORT
+                            + "/a11y/overlay?action=log&desc=" + desc);
                     java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
                     conn.setConnectTimeout(500);
                     conn.setReadTimeout(500);
                     conn.setRequestMethod("GET");
-                    String resp = "";
                     java.io.InputStream is = conn.getInputStream();
-                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
                     byte[] buf = new byte[256];
+                    java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
                     int n;
                     while ((n = is.read(buf)) != -1) baos.write(buf, 0, n);
-                    resp = baos.toString("UTF-8");
+                    String resp = baos.toString("UTF-8");
                     conn.disconnect();
                     if (resp.contains("\"paused\":true")) {
                         return cors(newFixedLengthResponse(Response.Status.OK,
                                 "application/json; charset=UTF-8", resp));
                     }
-                } catch (Exception ignored) {
-                    // If internal server unreachable, proceed normally
+                } catch (Exception e) {
+                    Log.w("BridgeService", "overlay log failed: " + e.getMessage());
                 }
             }
 
@@ -420,6 +478,20 @@ public class BridgeService extends Service {
                 if (!tokenManager.validate(token)) return cors(unauthorized());
                 StatusTracker.get().recordRequest(path);
                 return cors(handleInstall(body, params));
+            }
+
+            // === /overlay — proxy to internal overlay handler ===
+            if ("/overlay".equals(path)) {
+                if (!tokenManager.validate(token)) return cors(unauthorized());
+                return cors(proxyToA11y("GET", "/overlay", params, ""));
+            }
+
+            // === Session API routes — proxy to internal ===
+            if ("/session/start".equals(path) || "/session/end".equals(path)
+                    || "/session/status".equals(path)) {
+                if (!tokenManager.validate(token)) return cors(unauthorized());
+                StatusTracker.get().recordRequest(path);
+                return cors(proxyToA11y(method, path, params, body));
             }
 
             // === /status (Task 9) ===
@@ -461,6 +533,29 @@ public class BridgeService extends Service {
             StatusTracker.get().recordRequest(path);
 
             if (isA11yEndpoint(path)) {
+                // Permission gate for non-GET a11y actions
+                if (!"GET".equals(method)) {
+                    String agentName = session.getHeaders().getOrDefault("x-agent-name", "Unknown Agent");
+                    String sessionId = session.getHeaders().get("x-session-id");
+
+                    // Record action if session ID is provided
+                    if (sessionId != null && !sessionId.isEmpty()) {
+                        SessionManager.get().recordAction(sessionId, OverlayManager.describeOperation(method, path));
+                    }
+
+                    // Check if agent is trusted or has an active session
+                    if (!trustStore.isTrusted(token, agentName)) {
+                        SessionManager.SessionInfo activeSession = SessionManager.get().getActiveSession();
+                        if (activeSession == null) {
+                            // Launch permission gate, block up to 30s
+                            Response gateResponse = launchPermissionGate(token, agentName, session);
+                            if (gateResponse != null) {
+                                return cors(gateResponse);
+                            }
+                            // allowed — proceed
+                        }
+                    }
+                }
                 // Auto-unlock before a11y operations (Task 7)
                 KeyguardManager km = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
                 boolean locked = km != null && km.isKeyguardLocked();
@@ -773,7 +868,7 @@ public class BridgeService extends Service {
 
         private Response cors(Response resp) {
             resp.addHeader("Access-Control-Allow-Origin", "*");
-            resp.addHeader("Access-Control-Allow-Headers", "X-Bridge-Token, Content-Type");
+            resp.addHeader("Access-Control-Allow-Headers", "X-Bridge-Token, X-Agent-Name, X-Session-Id, Content-Type");
             resp.addHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
             return resp;
         }
