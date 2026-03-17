@@ -69,6 +69,47 @@ acts 中的每一步可以是：
     ]
   },
   {
+    "app": "app.olauncher",
+    "flow": "miui-open-app-from-drawer",
+    "desc": "MIUI 上 /launch 不可靠，通过 OLauncher app drawer 滑动查找并打开 app",
+    "acts": [
+      {"home": true},
+      {"swipe": "up", "note": "在桌面上滑打开 app drawer"},
+      {"screen": true, "note": "检查目标 app 是否在列表中（按拼音排序）"},
+      {"swipe": "up", "note": "如果没找到，继续向上滑动翻页，重复直到找到"},
+      {"click": "<app-name>", "note": "找到后点击打开"}
+    ]
+  },
+  {
+    "app": "com.brave.browser",
+    "flow": "brave-download-file-from-lan",
+    "desc": "通过 Brave 从局域网下载文件（实测 MIUI Redmi 流程）",
+    "acts": [
+      {"note": "先用 miui-open-app-from-drawer 打开 Brave，或从桌面点击"},
+      {"click": "url_bar_ref", "note": "点击地址栏（ref 包含当前 URL 文本）"},
+      {"type": "<download-url>"},
+      {"screen": true, "note": "出现搜索建议列表，点击第一个匹配项的 ref"},
+      {"wait": "是否重新下载文件？", "then": "none", "timeout": 3000, "optional": true},
+      {"click": "下载_ref", "note": "如果有重复下载确认，点'下载'按钮"},
+      {"wait": "无法安全地下载文件", "then": "none", "timeout": 5000, "optional": true},
+      {"wait": "保留", "then": "tap", "timeout": 5000, "note": "HTTP 安全警告，点保留"},
+      {"wait": "打开", "then": "tap", "timeout": 30000, "note": "下载完成后点打开"}
+    ]
+  },
+  {
+    "app": "com.android.settings",
+    "flow": "settings-search-and-navigate",
+    "desc": "通过设置搜索功能快速定位设置项（比滚动找更可靠）",
+    "acts": [
+      {"screen": true, "note": "在设置主页，搜索栏 text='搜索系统设置项'，但 click=null"},
+      {"click": "search_ref", "note": "用 ref 点击搜索栏（不能用 /click text，因为 click:null）"},
+      {"screen": true, "note": "搜索框打开，找到输入框 ref"},
+      {"click": "input_ref", "note": "聚焦输入框"},
+      {"type": "<search-term>"},
+      {"screen": true, "note": "点击搜索结果"}
+    ]
+  },
+  {
     "app": "any",
     "flow": "open-url-in-brave",
     "desc": "在 Brave 浏览器中打开指定 URL",
