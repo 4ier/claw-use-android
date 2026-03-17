@@ -21,6 +21,31 @@ curl http://phone:7333/screen -H "X-Bridge-Token: $TOKEN"
 
 That's the core loop: **screen → act → screen**. No coordinate guessing, no pixel parsing.
 
+## Flow-First: Learned Automation
+
+Agents get faster over time. The pattern:
+
+```
+1. Check flows.md — a library of learned UI sequences
+2. Match found? → Run via /flow (device-side, 100ms polling, zero LLM cost)
+3. Flow fails or no match? → Fall back to screen → act loop
+4. Task done? → Save the new sequence to flows.md for next time
+```
+
+Example: installing an APK on MIUI takes 5+ dialogs. First time, the agent navigates each one via screen→act (slow, ~40s). After that, it's a single `/flow` call:
+
+```bash
+curl -X POST http://phone:7333/flow -H "X-Bridge-Token: $TOKEN" \
+  -d '{"steps":[
+    {"wait":"继续安装","then":"tap","timeout":15000},
+    {"wait":"已了解此应用未经安全检测","then":"tap","timeout":10000,"optional":true},
+    {"wait":"继续更新","then":"tap","timeout":15000}
+  ]}'
+# Runs entirely on-device. No LLM calls. Completes in seconds.
+```
+
+`/flow` executes on the phone itself — polling the accessibility tree at 100ms intervals and reacting instantly when target elements appear. The agent skill includes a `flows.md` file that accumulates these patterns over time.
+
 ## What's New in v2.0.0
 
 Three unified endpoints replace the old scattered API for agent workflows:
