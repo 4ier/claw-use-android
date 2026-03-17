@@ -2,48 +2,97 @@
 
 **The Android implementation of [Claw Use](https://github.com/4ier/claw-use-android#claw-use-protocol) — a protocol for AI agents to control real devices.**
 
-One app. 37 API endpoints. Full phone control over HTTP. No ADB. No root. No PC.
+One app. Three core endpoints. Full phone control over HTTP. No ADB. No root. No PC.
 
 ```bash
-# See the screen
-curl http://phone:7333/screen
+# 1. See the screen — semantic UI tree with refs
+curl http://phone:7333/screen -H "X-Bridge-Token: $TOKEN"
+# → {"package":"com.whatsapp","elements":[{"ref":1,"text":"Search","role":"button","click":true}, ...]}
 
-# Take a screenshot
-curl http://phone:7333/screenshot
+# 2. Act on what you see
+curl -X POST http://phone:7333/act -H "X-Bridge-Token: $TOKEN" \
+  -d '{"click": 1}'       # click ref 1
+# → {"ref":1,"ok":true,"x":610,"y":280,"text":"Search"}
 
-# Tap, type, swipe
-curl -X POST http://phone:7333/tap -d '{"x":500,"y":1000}'
-curl -X POST http://phone:7333/type -d '{"text":"Hello world"}'
-curl -X POST http://phone:7333/swipe -d '{"direction":"up"}'
-
-# Speak, record, snap
-curl -X POST http://phone:7333/tts -d '{"text":"I can talk now"}'
-curl -X POST http://phone:7333/audio/record -d '{"durationMs":5000}'
-curl -X POST http://phone:7333/camera -d '{"facing":"back"}'
-
-# Read sensors & system state
-curl http://phone:7333/battery
-curl http://phone:7333/wifi
-curl http://phone:7333/location
-curl http://phone:7333/clipboard
-curl http://phone:7333/volume
-
-# Read/write files, contacts, SMS
-curl http://phone:7333/file/list?path=/sdcard/DCIM
-curl http://phone:7333/contacts?search=John
-curl http://phone:7333/sms?limit=5
-curl -X POST http://phone:7333/sms -d '{"to":"1234567","message":"Hi"}'
-
-# Launch apps, fire intents, read notifications
-curl -X POST http://phone:7333/launch -d '{"package":"com.whatsapp"}'
-curl -X POST http://phone:7333/intent -d '{"action":"android.intent.action.CALL","uri":"tel:+1234567890"}'
-curl http://phone:7333/notifications
+# 3. Observe the result
+curl http://phone:7333/screen -H "X-Bridge-Token: $TOKEN"
+# → new UI tree with new refs
 ```
+
+That's the core loop: **screen → act → screen**. No coordinate guessing, no pixel parsing.
+
+## What's New in v2.0.0
+
+Three unified endpoints replace the old scattered API for agent workflows:
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/screen` | GET | Semantic UI tree with stable `ref` IDs, `zone`, `role` |
+| `/snapshot` | GET | JPEG screenshot (base64) |
+| `/act` | POST | Unified action: click ref/text, tap, type, swipe, scroll, back, home, launch |
+
+All legacy endpoints (`/click`, `/tap`, `/swipe`, `/type`, `/scroll`, `/global`, `/screenshot`, etc.) remain supported.
+
+### POST /act — All Actions in One
+
+```bash
+# Click by ref (preferred — fast, precise)
+{"click": 3}
+
+# Click by text (fallback — searches UI tree)
+{"click": "Send"}
+
+# Click multiple refs in sequence
+{"click": [1, 2, 3]}
+
+# Tap coordinates
+{"tap": {"x": 540, "y": 960}}
+
+# Type text (into focused field, or focus ref first)
+{"type": "Hello world"}
+{"type": {"ref": 5, "text": "Hello world"}}
+
+# Swipe / scroll
+{"swipe": "up"}
+{"scroll": "down"}
+
+# Navigation
+{"back": true}
+{"home": true}
+{"recents": true}
+
+# Launch app
+{"launch": "com.whatsapp"}
+
+# Long press
+{"longpress": 3}
+
+# Multiple actions in one request
+{"home": true, "back": true}
+```
+
+### GET /screen — Semantic UI Tree
+
+```json
+{
+  "package": "com.android.settings",
+  "elements": [
+    {"ref": 1, "text": "Settings", "zone": "header"},
+    {"ref": 2, "text": "Search", "zone": "header", "role": "button", "click": true},
+    {"ref": 3, "text": "WLAN", "zone": "content"},
+    {"ref": 4, "text": "Bluetooth", "zone": "content"}
+  ]
+}
+```
+
+Query params:
+- `compact=true` — only interactive/text elements
+- `timeout=5000` — max ms to wait for accessibility tree
 
 ## Use Cases
 
 - **AI agent with a real phone**: Your agent can send messages, check apps, take screenshots, and speak — on a real device with real accounts
-- **Revive broken phones**: USB port dead? Screen cracked? If WiFi works, Claw Use gives the phone a second life. No ADB needed, no screen needed — the AI sees through `/screenshot`
+- **Revive broken phones**: USB port dead? Screen cracked? If WiFi works, Claw Use gives the phone a second life
 - **Remote phone access**: Add Tailscale and control your phone from anywhere in the world
 - **Spare phone automation**: Turn that old phone in your drawer into a dedicated AI worker
 - **Testing & QA**: Automate real-device testing without emulators
@@ -56,30 +105,31 @@ Install the app → enable Accessibility Service → your phone is now an HTTP-c
 
 Built for AI agents that need a real phone — not an emulator, not a cloud device, **your actual phone** with your actual apps, accounts, and data.
 
-## Features
+## Full Endpoint Reference
 
-### 👀 Perception (read the phone)
+### 👀 Perception
 | Endpoint | Method | What it does |
 |----------|--------|-------------|
-| `/screen` | GET | UI tree — every element, its text, bounds, clickable/scrollable state |
-| `/screenshot` | GET | Actual screenshot as base64 JPEG (configurable quality & resolution) |
+| `/screen` | GET | **Semantic UI tree** — elements with ref IDs, zone, role (v2.0) |
+| `/snapshot` | GET | **JPEG screenshot** as base64 (v2.0) |
+| `/screenshot` | GET | Screenshot (legacy, same format) |
 | `/notifications` | GET | All notifications with title, text, actions |
-| `/screen/state` | GET | Lock state, screen on/off |
 | `/info` | GET | Device model, OS, screen size, permissions |
 | `/status` | GET | Full health dashboard (uptime, request count, a11y latency) |
 
-### 🎯 Action (control the phone)
+### 🎯 Action
 | Endpoint | Method | What it does |
 |----------|--------|-------------|
-| `/tap` | POST | Tap at coordinates |
-| `/click` | POST | Tap by text or content description (semantic click) |
-| `/longpress` | POST | Long press at coordinates |
-| `/swipe` | POST | Swipe in any direction |
-| `/scroll` | POST | Scroll up/down/left/right |
-| `/type` | POST | Type text (supports CJK via clipboard) |
+| `/act` | POST | **Unified action** — click/tap/type/swipe/scroll/nav/launch (v2.0) |
+| `/tap` | POST | Tap at coordinates (legacy) |
+| `/click` | POST | Tap by text/desc/id (legacy) |
+| `/longpress` | POST | Long press (legacy) |
+| `/swipe` | POST | Swipe direction (legacy) |
+| `/scroll` | POST | Scroll direction (legacy) |
+| `/type` | POST | Type text (legacy) |
 | `/global` | POST | Back, home, recents, notifications, power dialog |
 | `/launch` | GET/POST | List installed apps / launch by package name |
-| `/intent` | POST | Fire any Android Intent (call, SMS, URL, share, deep links) |
+| `/intent` | POST | Fire any Android Intent |
 
 ### 🔊 Audio
 | Endpoint | Method | What it does |
@@ -92,21 +142,20 @@ Built for AI agents that need a real phone — not an emulator, not a cloud devi
 | Endpoint | Method | What it does |
 |----------|--------|-------------|
 | `/clipboard` | GET/POST | Read or write clipboard text |
-| `/camera` | POST | Capture photo (front/back, quality, max width) |
-| `/volume` | GET/POST | Read/set volume for all audio streams |
-| `/battery` | GET | Battery level, charging status, temperature |
-| `/wifi` | GET | WiFi connection info (SSID, IP, signal) |
-| `/location` | GET | GPS/network location with fallback |
-| `/vibrate` | POST | Vibrate the device (one-shot or pattern) |
+| `/camera` | POST | Capture photo (front/back) |
+| `/volume` | GET/POST | Read/set volume |
+| `/battery` | GET | Battery level, charging, temperature |
+| `/wifi` | GET | WiFi info (SSID, IP, signal) |
+| `/location` | GET | GPS/network location |
+| `/vibrate` | POST | Vibrate (one-shot or pattern) |
 | `/contacts` | GET | Search and list contacts |
-| `/sms` | GET/POST | Read inbox/sent messages, send SMS |
-| `/file` | GET/POST/DELETE | Read, write, delete files on device |
-| `/file/list` | GET | List directory contents |
+| `/sms` | GET/POST | Read/send SMS |
+| `/file` | GET/POST/DELETE | File operations |
 
 ### ⚡ Batch & Flow
 | Endpoint | Method | What it does |
 |----------|--------|-------------|
-| `/batch` | POST | Execute multiple operations in one request |
+| `/batch` | POST | Multiple operations in one request |
 | `/flow` | POST | Multi-step automation with conditions |
 
 ### 🔒 Security & Device
@@ -114,7 +163,7 @@ Built for AI agents that need a real phone — not an emulator, not a cloud devi
 |----------|--------|-------------|
 | `/screen/wake` | POST | Wake the screen |
 | `/screen/lock` | POST | Lock the device |
-| `/screen/unlock` | POST | Unlock with PIN (auto-unlock middleware handles this transparently) |
+| `/screen/unlock` | POST | Unlock with PIN |
 | `/config` | GET/POST/DELETE | Configure PIN for remote unlock |
 | `/ping` | GET | Health check (no auth required) |
 
@@ -125,36 +174,33 @@ X-Bridge-Token: <your-token>
 ```
 Token is generated on first launch and shown in the setup screen + notification bar.
 
-## Architecture
+## CLI (`cua`)
 
-```
-┌─────────────────────────────────────────┐
-│            :http process                │
-│  ┌─────────────────────────────────┐    │
-│  │  BridgeService (NanoHTTPD)      │    │
-│  │  0.0.0.0:7333                   │    │
-│  │  - Auth, CORS, rate tracking    │    │
-│  │  - /ping, /info, /launch local  │    │
-│  │  - Everything else → proxy      │────┼──┐
-│  └─────────────────────────────────┘    │  │
-│  WakeLock + WifiLock + Foreground Svc   │  │
-└─────────────────────────────────────────┘  │
-                                             │ HTTP proxy
-┌─────────────────────────────────────────┐  │ (localhost:7334)
-│            main process                 │  │
-│  ┌─────────────────────────────────┐    │  │
-│  │  AccessibilityBridge            │◄───┼──┘
-│  │  A11yInternalServer :7334       │    │
-│  │  - Screen reading               │    │
-│  │  - Gesture dispatch             │    │
-│  │  - Screenshots                  │    │
-│  │  - TTS, Intents, Notifications  │    │
-│  └─────────────────────────────────┘    │
-│  Heartbeat Watchdog (30s)               │
-└─────────────────────────────────────────┘
-```
+```bash
+# Device management
+cua add redmi 192.168.0.105 <token>
+cua devices
+cua discover                    # scan local network
 
-**Why two processes?** Android Accessibility Service can freeze (IPC deadlocks, unresponsive apps). If it hung in a single process, the HTTP server would die with it. The dual-process architecture keeps the external API responsive even when accessibility is stuck — the proxy returns a timeout error instead of hanging forever.
+# New unified commands (v2.0)
+cua screen                      # semantic UI tree
+cua screen -c                   # compact (text/interactive only)
+cua snapshot                    # save screenshot
+cua act '{"click": 3}'         # click ref 3
+cua act '{"type": "hello"}'    # type text
+cua act '{"swipe": "up"}'      # swipe
+
+# Legacy commands (still supported)
+cua tap 500 1000
+cua click "Send"
+cua swipe up
+cua type "Hello"
+cua screenshot
+
+# Full setup
+cua onboard                     # discover → register → PIN → perms → verify
+cua setup-perms                 # grant MIUI permissions
+```
 
 ## Quick Start
 
@@ -169,14 +215,12 @@ Download the APK from [Releases](https://github.com/4ier/claw-use-android/releas
 
 ### 4. Connect
 ```bash
-# Find your phone's IP in the app or via /ping
 curl http://<phone-ip>:7333/ping
-# → {"status":"ok","service":"claw-use-android","version":"1.2.0"}
+# → {"status":"ok","service":"claw-use-android","version":"2.0.0"}
 ```
 
 ### 5. Tell It Your PIN (for Remote Unlock)
 ```bash
-# This remembers your existing lock screen PIN — it does NOT change it
 curl -X POST http://<phone-ip>:7333/config \
   -H "X-Bridge-Token: <token>" \
   -d '{"pin":"your-existing-pin"}'
@@ -184,20 +228,19 @@ curl -X POST http://<phone-ip>:7333/config \
 
 ## Remote Access (Tailscale)
 
-Install [Tailscale](https://play.google.com/store/apps/details?id=com.tailscale.ipn) on the phone. Your phone gets a stable `100.x.x.x` address accessible from anywhere in your Tailscale network.
+Install [Tailscale](https://play.google.com/store/apps/details?id=com.tailscale.ipn) on the phone. Your phone gets a stable `100.x.x.x` address accessible from anywhere.
 
 ```bash
-# From anywhere in the world
-curl http://100.x.x.x:7333/screenshot -H "X-Bridge-Token: <token>"
+curl http://100.x.x.x:7333/screen -H "X-Bridge-Token: <token>"
 ```
 
-No port forwarding. No dynamic DNS. No firewall rules. Just works.
+No port forwarding. No dynamic DNS. Just works.
 
 ## Self-Update Loop
 
 The app includes an `UpdateReceiver` that listens for `MY_PACKAGE_REPLACED`. After installing a new version, the BridgeService automatically restarts — no manual app launch needed.
 
-This enables fully autonomous OTA updates: an AI agent can build a new APK, send it to the phone (e.g. via Telegram), navigate to download it, tap through the installer, and regain control after the update completes. **Zero human intervention.**
+This enables fully autonomous OTA updates: an AI agent can build a new APK, send it to the phone, navigate to download it, tap through the installer, and regain control after the update completes. **Zero human intervention.**
 
 ## MIUI/HyperOS Survival Guide
 
@@ -208,94 +251,33 @@ Xiaomi's aggressive battery optimization will kill background services. To keep 
 3. **Lock in recents**: Open Claw Use → long press in recent apps → tap the lock icon
 4. **Battery optimization**: The app auto-requests exemption on launch
 
-## API Details
+## Architecture
 
-### GET /screen
-Returns the accessibility tree as JSON.
-
-```json
-{
-  "package": "org.telegram.messenger",
-  "timestamp": 1742108400000,
-  "count": 26,
-  "nodes": [
-    {"text": "Search Chats", "bounds": "0,280,1220,422", "click": true},
-    {"text": "John", "desc": "Last message preview", "bounds": "0,422,1220,600"}
-  ]
-}
 ```
-
-Query params:
-- `compact=true` — only nodes with text/desc/clickable/editable/scrollable
-- `timeout=5000` — max milliseconds to wait for accessibility tree
-
-### GET /screenshot
-Returns a base64-encoded JPEG screenshot.
-
-```json
-{
-  "screenshot": "/9j/4AAQ...",
-  "format": "jpeg",
-  "quality": 50,
-  "sizeBytes": 42000,
-  "timestamp": 1742108400000
-}
-```
-
-Query params:
-- `quality=50` — JPEG quality (10-100, default 50)
-- `maxWidth=720` — max pixel width (100-2000, default 720)
-
-### POST /click
-Semantic click — finds an element by text or description and taps its center.
-
-```json
-{"text": "Send"}
-// or
-{"desc": "Search button"}
-// or
-{"id": "com.app:id/send_button"}
-```
-
-### POST /type
-Types text. Uses clipboard paste for reliable CJK support.
-
-```json
-{"text": "你好世界"}
-// → {"typed": true, "text": "你好世界", "method": "clipboard_paste"}
-```
-
-### POST /intent
-Fire any Android Intent.
-
-```json
-// Open a URL
-{"action": "android.intent.action.VIEW", "uri": "https://example.com"}
-
-// Make a phone call
-{"action": "android.intent.action.CALL", "uri": "tel:+1234567890"}
-
-// Send SMS
-{"action": "android.intent.action.SENDTO", "uri": "smsto:+1234567890", "extras": {"sms_body": "Hello"}}
-
-// Share text
-{"action": "android.intent.action.SEND", "type": "text/plain", "extras": {"android.intent.extra.TEXT": "Check this out"}}
-
-// Deep link
-{"action": "android.intent.action.VIEW", "uri": "tg://resolve?domain=username"}
-```
-
-### POST /tts
-Speak text through the phone's speaker.
-
-```json
-{"text": "Hello world", "language": "en-US", "rate": 1.0, "pitch": 1.0}
+┌──────────────────────────────────────┐
+│         BridgeService                │
+│         0.0.0.0:7333                 │
+│                                      │
+│  Auth · CORS · Auto-unlock · Routing │
+│                                      │
+│  ┌────────────┐  ┌───────────────┐   │
+│  │ScreenHandler│  │  ActHandler   │   │
+│  │ /screen     │  │  /act         │   │
+│  │ /snapshot   │  │  unified ops  │   │
+│  └─────┬──────┘  └──────┬────────┘   │
+│        │                │            │
+│  ┌─────▼────────────────▼────────┐   │
+│  │    AccessibilityBridge        │   │
+│  │    UI tree · Gestures · TTS   │   │
+│  └───────────────────────────────┘   │
+│  WakeLock + WifiLock + Foreground    │
+└──────────────────────────────────────┘
 ```
 
 ## Requirements
 
 - Android 7.0+ (API 24) for core features
-- Android 11+ (API 30) for `/screenshot`
+- Android 11+ (API 30) for `/snapshot` and `/screenshot`
 - No root required
 - No ADB required
 - No PC required
@@ -313,16 +295,14 @@ cd claw-use-android
 
 Claw Use Android is the first implementation of the **Claw Use protocol** — a standard HTTP API for AI agents to control physical devices.
 
-The protocol defines a common set of endpoints (`/screen`, `/screenshot`, `/tap`, `/type`, `/tts`, etc.) that any device can implement. The same `cu` CLI and agent skills work across all compliant devices:
+The protocol defines a common set of endpoints that any device can implement. The same `cua` CLI and agent skills work across all compliant devices:
 
 ```bash
 cua add redmi 192.168.0.105 <token>     # Android phone
 cua add ipad 100.80.1.10 <token>        # future: iOS
 cua add laptop 100.80.1.20 <token>      # future: desktop
-cua -d redmi screenshot                  # same command, any device
+cua -d redmi screen                      # same command, any device
 ```
-
-Want to add Claw Use support for a new platform? Implement the HTTP endpoints documented above, return JSON, support token auth. The ecosystem comes free.
 
 ## License
 
