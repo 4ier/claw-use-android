@@ -86,6 +86,8 @@ cua screen -c          # see result
 - 如果没有匹配 flow → 走 screen→act 循环，完成后**沉淀新 flow 到 `flows.md`**
 - 如果 flow 执行失败（超时、元素未找到等）→ **回退到 screen→act 循环**继续完成任务，事后修正 flows.md
 
+**主动沉淀（必须执行）：** 完成任何多步操作后，立即审视刚才的步骤序列。如果发现可复用的模式（哪怕只是部分步骤），当场追加到 `flows.md`。不要等用户提醒。沉淀是 agent 的责任，不是用户的。
+
 这样做的好处：
 1. **快**：`/flow` 在设备端 100ms 轮询执行，不经过 LLM
 2. **省 token**：一个 flow 替代 5-10 轮 agent 推理
