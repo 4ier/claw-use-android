@@ -97,10 +97,9 @@
             android:taskAffinity=""
             android:showOnLockScreen="true" />
 
-        <!-- HTTP Bridge Foreground Service — runs in separate :http process -->
+        <!-- HTTP Bridge Foreground Service — same process as AccessibilityBridge -->
         <service
             android:name=".BridgeService"
-            android:process=":http"
             android:foregroundServiceType="specialUse"
             android:exported="false">
             <property

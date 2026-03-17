@@ -11,7 +11,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 15
-        versionName = "1.7.0"
+        versionName = "2.0.0"
     }
 
     compileOptions {
@@ -33,7 +33,6 @@ configurations.all {
 }
 
 dependencies {
-    implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.appcompat:appcompat:1.6.1")

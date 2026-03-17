@@ -15,11 +15,13 @@ import java.util.List;
 /**
  * Core AccessibilityService that provides UI tree reading, gesture dispatch,
  * and global actions. Singleton pattern for access from HTTP handlers.
+ *
+ * Runs in the MAIN process (same as BridgeService after the single-process merge).
+ * On connect, tells BridgeService to initialize a11y-dependent handlers.
  */
 public class AccessibilityBridge extends AccessibilityService {
     private static final String TAG = "ClawA11y";
     private static volatile AccessibilityBridge instance;
-    private A11yInternalServer internalServer;
 
     public static AccessibilityBridge getInstance() {
         return instance;
@@ -38,9 +40,13 @@ public class AccessibilityBridge extends AccessibilityService {
         // Initialize overlay manager (needs a11y service context for TYPE_ACCESSIBILITY_OVERLAY)
         OverlayManager.getInstance(this);
 
-        // Start internal a11y server for cross-process communication
-        internalServer = new A11yInternalServer(this);
-        internalServer.startServer();
+        // Tell BridgeService to initialize a11y handlers (same process now)
+        BridgeService bridge = BridgeService.getInstance();
+        if (bridge != null) {
+            bridge.initA11yHandlers(this);
+        } else {
+            Log.w(TAG, "BridgeService not yet started, handlers will init when it starts");
+        }
     }
 
     @Override
@@ -56,7 +62,6 @@ public class AccessibilityBridge extends AccessibilityService {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (internalServer != null) internalServer.stopServer();
         instance = null;
         Log.i(TAG, "AccessibilityBridge destroyed");
     }
@@ -134,14 +139,10 @@ public class AccessibilityBridge extends AccessibilityService {
     /**
      * Find a node by text using system API (single IPC call to system_server).
      * Two-pass: exact match first, then first contains match.
-     *
-     * OLD approach: manual DFS = N nodes × ~7 IPC calls each = thousands of Binder roundtrips.
-     * NEW approach: findAccessibilityNodeInfosByText() = 1 IPC call, search runs in system_server.
      */
     public AccessibilityNodeInfo findByText(AccessibilityNodeInfo root, String text) {
         if (root == null || text == null || text.isEmpty()) return null;
 
-        // System API: searches in system_server process, single IPC
         List<AccessibilityNodeInfo> results = root.findAccessibilityNodeInfosByText(text);
         if (results == null || results.isEmpty()) return null;
 
@@ -151,7 +152,6 @@ public class AccessibilityBridge extends AccessibilityService {
         for (AccessibilityNodeInfo node : results) {
             String nodeText = node.getText() != null ? node.getText().toString() : "";
             if (nodeText.toLowerCase().equals(lower)) {
-                // Recycle all others
                 for (AccessibilityNodeInfo other : results) {
                     if (other != node) {
                         try { other.recycle(); } catch (Exception ignored) {}
@@ -171,15 +171,10 @@ public class AccessibilityBridge extends AccessibilityService {
 
     /**
      * Find a node by resource ID using system API (single IPC call).
-     * findAccessibilityNodeInfosByViewId() requires full resource name like
-     * "com.android.settings:id/title". For partial IDs, falls back to
-     * depth-limited manual search.
      */
     public AccessibilityNodeInfo findById(AccessibilityNodeInfo root, String id) {
         if (root == null || id == null || id.isEmpty()) return null;
 
-        // System API works best with fully-qualified IDs (package:id/name)
-        // Try it first — single IPC call
         List<AccessibilityNodeInfo> results = root.findAccessibilityNodeInfosByViewId(id);
         if (results != null && !results.isEmpty()) {
             AccessibilityNodeInfo first = results.get(0);
@@ -189,7 +184,7 @@ public class AccessibilityBridge extends AccessibilityService {
             return first;
         }
 
-        // Fallback for partial IDs: depth-limited manual search (max depth 15)
+        // Fallback for partial IDs: depth-limited manual search
         return findByIdManual(root, id, 0, 15);
     }
 
@@ -213,7 +208,6 @@ public class AccessibilityBridge extends AccessibilityService {
 
     /**
      * Find a node by content description (case-insensitive partial match).
-     * No system API for desc search — manual traversal with depth limit.
      */
     public AccessibilityNodeInfo findByDesc(AccessibilityNodeInfo root, String desc) {
         if (root == null || desc == null || desc.isEmpty()) return null;

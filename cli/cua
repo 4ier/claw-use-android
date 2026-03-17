@@ -289,6 +289,55 @@ with open('$tmp','wb') as f: f.write(base64.b64decode(d['screenshot']))
   fi
 }
 
+cmd_snapshot() {
+  _require_config
+  local quality="${1:-50}" maxWidth="${2:-720}" output="${3:-}"
+  local result=$(_api GET "/snapshot?quality=$quality&maxWidth=$maxWidth")
+
+  if echo "$result" | grep -q '"error"'; then
+    echo "$result" | _jq_or_raw
+    return 1
+  fi
+
+  local size=$(echo "$result" | grep -o '"sizeBytes":[0-9]*' | cut -d: -f2)
+
+  if [ -n "$output" ]; then
+    echo "$result" | python3 -c "
+import sys,json,base64
+d=json.load(sys.stdin)
+with open('$output','wb') as f: f.write(base64.b64decode(d['screenshot']))
+" && _ok "Saved ${size}B → $output"
+  else
+    local tmp="/tmp/cu-snapshot-$(date +%s).jpg"
+    echo "$result" | python3 -c "
+import sys,json,base64
+d=json.load(sys.stdin)
+with open('$tmp','wb') as f: f.write(base64.b64decode(d['screenshot']))
+"
+    _ok "${size}B → $tmp"
+    echo "$tmp"
+  fi
+}
+
+cmd_act() {
+  _require_config
+  local json_body="${1:-}"
+  [ -n "$json_body" ] || _err "Usage: cua act '<json>'
+Examples:
+  cua act '{\"click\": 3}'            # click ref 3
+  cua act '{\"click\": \"OK\"}'       # click by text
+  cua act '{\"click\": [1,2,3]}'      # click refs in sequence
+  cua act '{\"tap\": {\"x\":500,\"y\":500}}'
+  cua act '{\"type\": \"hello\"}'
+  cua act '{\"swipe\": \"up\"}'
+  cua act '{\"back\": true}'
+  cua act '{\"home\": true}'
+  cua act '{\"scroll\": \"down\"}'
+  cua act '{\"launch\": \"com.app\"}'
+  cua act '{\"longpress\": 5}'"
+  _api_json POST /act -d "$json_body" | _jq_or_raw
+}
+
 cmd_tap() {
   _require_config
   local x="${1:-}" y="${2:-}"
@@ -797,11 +846,26 @@ PERCEPTION
   cu ping                   Health check
   cu info                   Device info
   cu status                 Full health dashboard
-  cu screen [-c] [-t ms]    Read UI tree (-c = compact)
-  cua screenshot [q] [w] [f] Screenshot (quality, maxWidth, output file)
+  cu screen [-c] [-t ms]    Read UI tree (semantic, with refs)
+  cu snapshot [q] [w] [f]   Screenshot via /snapshot endpoint
+  cua screenshot [q] [w] [f] Screenshot (legacy /screenshot)
   cu notifications          List notifications
 
-ACTION
+ACTION (new unified /act endpoint)
+  cu act '<json>'           Unified action endpoint
+    {"click": 3}            Click by ref (from screen)
+    {"click": "OK"}         Click by text
+    {"click": [1,2,3]}      Click refs in sequence
+    {"tap": {"x":N,"y":N}}  Tap coordinates
+    {"type": "text"}        Type text
+    {"swipe": "up"}         Swipe direction
+    {"scroll": "down"}      Scroll direction
+    {"back": true}          Press back
+    {"home": true}          Press home
+    {"launch": "com.app"}   Launch app
+    {"longpress": 3}        Long press ref
+
+ACTION (legacy endpoints, still supported)
   cu tap <x> <y>            Tap coordinates
   cu click <text>           Tap element by text
   cu longpress <x> <y>      Long press
@@ -862,7 +926,9 @@ case "$cmd" in
   info) cmd_info ;;
   status) cmd_status ;;
   screen) cmd_screen "$@" ;;
+  snapshot) cmd_snapshot "$@" ;;
   screenshot|ss) cmd_screenshot "$@" ;;
+  act) cmd_act "$@" ;;
   tap) cmd_tap "$@" ;;
   click) cmd_click "$@" ;;
   longpress|lp) cmd_longpress "$@" ;;

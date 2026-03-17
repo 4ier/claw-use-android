@@ -2,7 +2,7 @@
 
 Give your AI agent eyes, hands, and a voice on a real Android phone.
 
-`claw-use-android` is an Android app + CLI (`cua`) that exposes 37 HTTP endpoints for full phone control. No ADB, no root, no PC.
+`claw-use-android` is an Android app + CLI (`cua`) that exposes HTTP endpoints for full phone control. No ADB, no root, no PC.
 
 ## Setup
 
@@ -13,7 +13,73 @@ cua add redmi 192.168.0.105 <token>
 cua ping
 ```
 
-## CLI Reference (`cua`)
+## New in v2.0.0: Unified API
+
+Three new endpoints replace the scattered old endpoints for AI agent workflows:
+
+### GET /screen — Semantic UI Tree
+Returns elements with stable integer `ref` IDs, semantic `zone`, and `role` annotations.
+
+```bash
+cua screen              # full semantic UI tree (JSON)
+cua screen -c           # compact: only interactive/text elements
+```
+
+Response:
+```json
+{
+  "package": "com.android.settings",
+  "elements": [
+    {"ref": 1, "text": "设置", "zone": "header"},
+    {"ref": 2, "text": "搜索", "zone": "header", "role": "button", "click": true},
+    {"ref": 3, "text": "WLAN", "zone": "content"}
+  ]
+}
+```
+
+### GET /snapshot — JPEG Screenshot
+Returns a base64-encoded JPEG screenshot.
+
+```bash
+cua snapshot              # save screenshot, print path
+cua snapshot 50 720 out.jpg  # quality, maxWidth, output
+```
+
+### POST /act — Unified Action Endpoint
+All operations through a single entry point, using `ref` IDs from `/screen`.
+
+```bash
+cua act '{"click": 3}'              # click ref 3
+cua act '{"click": "OK"}'           # click by text (fallback)
+cua act '{"click": [1, 2, 3]}'      # click refs in sequence
+cua act '{"tap": {"x": 540, "y": 960}}'
+cua act '{"type": "hello"}'          # type into focused field
+cua act '{"type": {"ref": 3, "text": "hello"}}'  # focus ref then type
+cua act '{"swipe": "up"}'            # directional swipe
+cua act '{"scroll": "down"}'         # scroll nearest scrollable
+cua act '{"back": true}'
+cua act '{"home": true}'
+cua act '{"recents": true}'
+cua act '{"longpress": 3}'           # long press ref
+cua act '{"launch": "com.duolingo"}'
+
+# Multiple actions in one request:
+cua act '{"home": true, "back": true}'
+```
+
+### Agent Workflow Pattern (screen → act loop)
+```bash
+# 1. Observe
+cua screen -c          # get refs
+# 2. Act
+cua act '{"click": 5}' # click ref 5
+# 3. Observe again
+cua screen -c          # see result
+```
+
+## Legacy CLI Reference (`cua`)
+
+All legacy endpoints remain supported alongside the new unified API.
 
 ### Device Management
 ```bash
@@ -253,7 +319,16 @@ cua -d <name> ping
 
 ## Workflow Patterns
 
-### Navigate and interact
+### Navigate and interact (v2.0+ recommended)
+```bash
+cua act '{"launch": "org.telegram.messenger"}'
+cua screen -c
+cua act '{"click": "Search Chats"}'
+cua act '{"type": "John"}'
+cua act '{"click": "John"}'
+```
+
+### Navigate and interact (legacy)
 ```bash
 cua launch org.telegram.messenger
 cua screen -c
@@ -264,11 +339,11 @@ cua click "John"
 
 ### Visual + semantic perception
 ```bash
-cua screen -c                          # what elements exist (structured)
-cua screenshot 50 720 /tmp/look.jpg   # what it looks like (visual)
+cua screen -c                          # what elements exist (structured, with refs)
+cua snapshot 50 720 /tmp/look.jpg      # what it looks like (visual)
 ```
 
-**Prefer `screen -c` over `screenshot`** for decision-making. Structured a11y data is faster to process and has exact coordinates. Use screenshot only when visual context matters (images, colors, layout).
+**Prefer `screen -c` over `snapshot`** for decision-making. Structured a11y data is faster to process, has exact coordinates, and provides ref IDs for `/act`. Use snapshot only when visual context matters (images, colors, layout).
 
 ### Handle locked device
 Automatic — any command auto-unlocks if PIN is configured. No special handling needed.
