@@ -77,6 +77,19 @@ cua act '{"click": 5}' # click ref 5
 cua screen -c          # see result
 ```
 
+### Flow-First Principle
+
+**执行手机操作前，先读 `flows.md`（与本文件同目录）。**
+
+- 如果有匹配的 flow → 直接用 `/flow` 或批量脚本执行，跳过逐步推理
+- 如果 flow 中有 `{"screen":true}` 断点 → 在该步读屏后由 agent 决策，然后继续
+- 如果没有匹配 flow → 走 screen→act 循环，完成后**沉淀新 flow 到 `flows.md`**
+
+这样做的好处：
+1. **快**：`/flow` 在设备端 100ms 轮询执行，不经过 LLM
+2. **省 token**：一个 flow 替代 5-10 轮 agent 推理
+3. **可积累**：每次新场景都沉淀，agent 越用越快
+
 ## Legacy CLI Reference (`cua`)
 
 All legacy endpoints remain supported alongside the new unified API.
