@@ -83,6 +83,84 @@ acts 中的每一步可以是：
 ]
 ```
 
+---
+
+## Duolingo 自动刷课
+
+### 题型识别规则
+
+通过 `/screen` 返回的 elements 结构判断题型：
+
+| 题型 | instruction | 特征 |
+|------|------------|------|
+| 选词翻译（日→中） | "翻译这句话" | prompt 是日文，候选词 `desc` 是中文，`text` 为 null |
+| 选词翻译（中→日） | "翻译这句话" | prompt 是中文，候选词 `desc` 是日文假名/汉字 |
+| 选词填空 | "选词填空" | 句子 slots 有 `role:"button"`，候选词 `role:null`，全日文 |
+
+### 答题决策
+
+**选词翻译**：根据 prompt 语义，从候选词（desc 字段）中选出正确的词，按目标语语序依次点击 ref。
+
+**选词填空**：句子中有一个空位（缺失的词），从候选词中选语义最匹配的填入。
+
+### 通用答题 flow
+
+```json
+[
+  {
+    "app": "com.duolingo",
+    "flow": "duolingo-answer-and-continue",
+    "desc": "答完题后的固定流程：检查 → 继续",
+    "acts": [
+      {"click": "检查"},
+      {"wait": "继续", "then": "tap", "timeout": 5000},
+      {"screen": true, "note": "检查是否还在课程中（看是否有 instruction 元素）"}
+    ]
+  },
+  {
+    "app": "com.duolingo",
+    "flow": "duolingo-post-lesson",
+    "desc": "课程结束后的奖励/排行榜连续点击流程",
+    "acts": [
+      {"wait": "领取经验", "then": "tap", "timeout": 5000},
+      {"wait": "继续", "then": "tap", "timeout": 5000},
+      {"wait": "继续", "then": "tap", "timeout": 5000, "optional": true},
+      {"wait": "继续", "then": "tap", "timeout": 5000, "optional": true},
+      {"wait": "继续", "then": "tap", "timeout": 5000, "optional": true},
+      {"wait": "继续", "then": "tap", "timeout": 5000, "optional": true}
+    ]
+  },
+  {
+    "app": "com.duolingo",
+    "flow": "duolingo-open-next-lesson",
+    "desc": "从主页开始下一课",
+    "acts": [
+      {"screen": true, "note": "确认在主页（有 Learn Tab），找到 '继续' 按钮"},
+      {"click": "继续", "note": "开始当前课程"}
+    ]
+  }
+]
+```
+
+### Agent 刷课循环伪代码
+
+```
+1. 打开多邻国（从 app drawer 找 '多邻国'，MIUI /launch 不可靠）
+2. 如果在主页 → 点 '继续' 开始课程
+3. 读屏 → 识别题型
+4. 根据题型选答案 → 依次点击 ref
+5. 执行 duolingo-answer-and-continue flow
+6. 如果出现 '领取经验' → 执行 duolingo-post-lesson flow → 课程结束
+7. 否则回到步骤 3
+```
+
+### 注意事项
+- 候选词有重复（每个词出现两次，ref 不同），选第一组即可（较小的 ref）
+- 选词填空的候选词 `click: null` 但仍可通过 `/act {"click": ref}` 点击
+- 答错会扣红心（ref 1 desc 显示 "还有 N 颗红心"），25 颗用完课程终止
+- 课程结束后会连续弹 3-5 个奖励/排行/任务弹窗，全部点 '继续' 即可
+- MIUI 上 `/launch` 打开多邻国不可靠，改用 app drawer 滑动查找
+
 ## 沉淀规范
 
 新增 flow 时遵循：
