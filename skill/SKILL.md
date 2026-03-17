@@ -84,6 +84,7 @@ cua screen -c          # see result
 - 如果有匹配的 flow → 直接用 `/flow` 或批量脚本执行，跳过逐步推理
 - 如果 flow 中有 `{"screen":true}` 断点 → 在该步读屏后由 agent 决策，然后继续
 - 如果没有匹配 flow → 走 screen→act 循环，完成后**沉淀新 flow 到 `flows.md`**
+- 如果 flow 执行失败（超时、元素未找到等）→ **回退到 screen→act 循环**继续完成任务，事后修正 flows.md
 
 这样做的好处：
 1. **快**：`/flow` 在设备端 100ms 轮询执行，不经过 LLM
