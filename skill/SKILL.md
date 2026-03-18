@@ -1,3 +1,8 @@
+---
+name: claw-use-android
+description: Give AI agents full control of Android devices. No root. No ADB. No PC. One APK + HTTP API for screen reading, tapping, typing, swiping, app launching, camera, clipboard, SMS, and more.
+---
+
 # Claw Use Android — Phone Control for AI Agents
 
 Give your AI agent eyes, hands, and a voice on a real Android phone.
