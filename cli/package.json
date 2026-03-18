@@ -1,0 +1,38 @@
+{
+  "name": "claw-use-android",
+  "version": "2.0.0",
+  "description": "Give AI agents full control of Android devices. No root. No ADB. No PC.",
+  "bin": {
+    "cua": "./cua"
+  },
+  "keywords": [
+    "android",
+    "accessibility",
+    "ai-agent",
+    "phone-control",
+    "automation",
+    "claw-use",
+    "adb-alternative"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/claw-use/claw-use-android"
+  },
+  "homepage": "https://github.com/claw-use/claw-use-android",
+  "bugs": {
+    "url": "https://github.com/claw-use/claw-use-android/issues"
+  },
+  "license": "MIT",
+  "author": "claw-use",
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "files": [
+    "cua"
+  ]
+}
