@@ -1,6 +1,16 @@
 ---
 name: claw-use-android
 description: Give AI agents full control of Android devices. No root. No ADB. No PC. One APK + HTTP API for screen reading, tapping, typing, swiping, app launching, camera, clipboard, SMS, and more.
+metadata:
+  openclaw:
+    requires:
+      bins: ["cua"]
+    install:
+      - id: node
+        kind: node
+        package: claw-use-android
+        bins: ["cua"]
+        label: "Install Claw Use Android CLI (npm)"
 ---
 
 # Claw Use Android — Phone Control for AI Agents
