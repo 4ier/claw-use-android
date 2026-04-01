@@ -1,6 +1,6 @@
 # 🤖 Claw Use Android
 
-**The Android implementation of [Claw Use](https://github.com/4ier/claw-use-android#claw-use-protocol) — a protocol for AI agents to control real devices.**
+**The Android implementation of [Claw Use](https://github.com/claw-use/claw-use-android#claw-use-protocol) — a protocol for AI agents to control real devices.**
 
 One app. Three core endpoints. Full phone control over HTTP. No ADB. No root. No PC.
 
@@ -230,7 +230,7 @@ cua setup-perms                 # grant MIUI permissions
 ## Quick Start
 
 ### 1. Install
-Download the APK from [Releases](https://github.com/4ier/claw-use-android/releases) and install it.
+Download the APK from [Releases](https://github.com/claw-use/claw-use-android/releases) and install it.
 
 ### 2. Enable Accessibility Service
 `Settings → Accessibility → Claw Use → Enable`
@@ -310,7 +310,7 @@ Xiaomi's aggressive battery optimization will kill background services. To keep 
 ## Building from Source
 
 ```bash
-git clone https://github.com/4ier/claw-use-android.git
+git clone https://github.com/claw-use/claw-use-android.git
 cd claw-use-android
 ./gradlew assembleDebug
 # APK at app/build/outputs/apk/debug/app-debug.apk
